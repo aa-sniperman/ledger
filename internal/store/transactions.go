@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/sniperman/ledger/internal/domain"
@@ -258,14 +259,22 @@ func (r *TransactionRepository) DiscardEntries(ctx context.Context, entryIDs []s
 		return nil
 	}
 
-	query, args := buildStringInQuery(`
+	placeholders := make([]string, 0, len(entryIDs))
+	args := make([]any, 0, len(entryIDs)+1)
+	args = append(args, discardedAt)
+
+	for index, entryID := range entryIDs {
+		placeholders = append(placeholders, fmt.Sprintf("$%d", index+2))
+		args = append(args, entryID)
+	}
+
+	query := fmt.Sprintf(`
 UPDATE ledger.ledger_entries
 SET discarded_at = $1
 WHERE entry_id IN (%s)
   AND discarded_at IS NULL
-`, entryIDs)
+`, strings.Join(placeholders, ", "))
 
-	args = append([]any{discardedAt}, args...)
 	if _, err := r.db.ExecContext(ctx, query, args...); err != nil {
 		return fmt.Errorf("discard entries: %w", err)
 	}

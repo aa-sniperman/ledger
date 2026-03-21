@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -84,6 +85,13 @@ func (s *TransactionService) Create(ctx context.Context, input CreateTransaction
 		return nil
 	})
 	if err != nil {
+		if input.Flow == TransactionFlowAuthorizing && isPotentialIdempotentReplayError(err) {
+			existing, lookupErr := store.NewRepositories(s.db).Transactions.GetByPostingKey(ctx, transaction.PostingKey)
+			if lookupErr == nil {
+				return existing, true, nil
+			}
+		}
+
 		if store.IsUniqueViolation(err) {
 			existing, lookupErr := store.NewRepositories(s.db).Transactions.GetByPostingKey(ctx, transaction.PostingKey)
 			if lookupErr == nil {
@@ -95,6 +103,10 @@ func (s *TransactionService) Create(ctx context.Context, input CreateTransaction
 	}
 
 	return result, idempotent, nil
+}
+
+func isPotentialIdempotentReplayError(err error) bool {
+	return err != nil && (store.IsUniqueViolation(err) || errors.Is(err, domain.ErrBalanceLockFailed))
 }
 
 func buildTransaction(input CreateTransactionInput) (domain.Transaction, error) {
