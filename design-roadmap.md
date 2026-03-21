@@ -1,0 +1,11 @@
+- Understand double entry via the bill split example with 2 lines: credit & debit
+- Basic Statuses of entries: pending, posted, archieved
+- Immutability of entries, append only enforcement, the only mutation is to discard pending entries
+- Account Balance is the aggregation of entries: with pending balance = sum of pending entries + posted entries, posted balance = sum of posted entries, archived entries don't contribute to balance
+- Advanced: classify balances to reflect the financial reality & liabilities: pending/posted credits, pending/posted debits, what is normal_balance of account ( 2 cases: account is credit_normal of debit_normal)
+- Lifecycle of a transaction in the ledger: from creating pending entries, wait for real money execution, get confirmation, created posted or archived transactions.
+- 2 mode để tạo transaction trong ledger: recording mode & authorizing mode, khi nào thì dùng mode nào
+- Advanced: Effective balance
+- Handle concurrent transactions involving 1 account? 3 strategies: pessimistic locking, version locking, balance locking, pros & cons of each
+- Handle idempotency
+- Scaling strat to handle high TPS? Async execution + sharding
