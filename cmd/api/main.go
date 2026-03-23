@@ -53,7 +53,7 @@ func main() {
 
 	server := httpapi.New(cfg, db)
 	if len(shardDBs) > 0 {
-		router, err := sharding.NewRouter(cfg.ShardIDs, nil)
+		router, err := sharding.NewRouter(cfg.ShardIDs, cfg.SystemAccountPoolSizes)
 		if err != nil {
 			slog.Error("build shard router", "error", err)
 			os.Exit(1)

@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/sniperman/ledger/internal/command"
 	"github.com/sniperman/ledger/internal/service"
 	"github.com/sniperman/ledger/internal/store"
 )
@@ -72,26 +71,6 @@ func (s *Server) handleGetUserBalance(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toAccountBalanceResponse(balance))
 }
 
-func (s *Server) handleGetCommand(w http.ResponseWriter, r *http.Request) {
-	commandID := r.PathValue("id")
-	if commandID == "" {
-		writeError(w, http.StatusBadRequest, "command id is required")
-		return
-	}
-
-	envelope, err := s.queryService.GetCommand(r.Context(), commandID)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, err.Error())
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal server error")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, toCommandResponse(envelope))
-}
-
 func toAccountBalanceResponse(balance service.AccountBalanceView) accountBalanceResponse {
 	return accountBalanceResponse{
 		AccountID:      balance.AccountID,
@@ -102,22 +81,5 @@ func toAccountBalanceResponse(balance service.AccountBalanceView) accountBalance
 		Pending:        balance.Pending,
 		Available:      balance.Available,
 		UpdatedAt:      balance.UpdatedAt,
-	}
-}
-
-func toCommandResponse(envelope command.Envelope) commandResponse {
-	return commandResponse{
-		CommandID:      envelope.CommandID,
-		IdempotencyKey: envelope.IdempotencyKey,
-		ShardID:        string(envelope.ShardID),
-		Type:           string(envelope.Type),
-		Status:         string(envelope.Status),
-		AttemptCount:   envelope.AttemptCount,
-		NextAttemptAt:  envelope.NextAttemptAt,
-		Result:         envelope.Result,
-		ErrorCode:      envelope.ErrorCode,
-		ErrorMessage:   envelope.ErrorMessage,
-		CreatedAt:      envelope.CreatedAt,
-		UpdatedAt:      envelope.UpdatedAt,
 	}
 }

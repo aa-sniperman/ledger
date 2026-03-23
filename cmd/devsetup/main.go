@@ -22,8 +22,6 @@ import (
 	"github.com/sniperman/ledger/internal/worker"
 )
 
-const payoutHoldPoolSize = 4
-
 func main() {
 	var (
 		usersFlag = flag.String("users", "user_123,user_456", "comma-separated user ids to seed")
@@ -119,9 +117,7 @@ func openEnvironment(ctx context.Context, cfg config.Config) (*sql.DB, map[shard
 		return nil, nil, sharding.Router{}, nil, err
 	}
 
-	router, err := sharding.NewRouter(cfg.ShardIDs, map[sharding.SystemAccountRole]int{
-		sharding.SystemAccountRolePayoutHold: payoutHoldPoolSize,
-	})
+	router, err := sharding.NewRouter(cfg.ShardIDs, cfg.SystemAccountPoolSizes)
 	if err != nil {
 		_ = centralDB.Close()
 		return nil, nil, sharding.Router{}, nil, err
@@ -171,15 +167,22 @@ func seedAccounts(ctx context.Context, router sharding.Router, registry *shardin
 			return err
 		}
 
-		if err := ensureAccount(ctx, db, systemAccountState(cashInClearingAccountID(shardID, currency), currency, domain.NormalBalanceDebit, now)); err != nil {
+		cashInAccounts, err := router.SystemAccountIDsForShard(shardID, currency, sharding.SystemAccountRoleCashIn)
+		if err != nil {
 			return err
 		}
-		if err := ensureAccount(ctx, db, systemAccountState(fmt.Sprintf("%s:%s:%s", sharding.SystemAccountRolePayoutHold, shardID, currency), currency, domain.NormalBalanceCredit, now)); err != nil {
-			return err
+		for _, accountID := range cashInAccounts {
+			if err := ensureAccount(ctx, db, systemAccountState(accountID, currency, domain.NormalBalanceDebit, now)); err != nil {
+				return err
+			}
 		}
 
-		for slot := 0; slot < payoutHoldPoolSize; slot++ {
-			if err := ensureAccount(ctx, db, systemAccountState(fmt.Sprintf("%s:%s:%s:%d", sharding.SystemAccountRolePayoutHold, shardID, currency, slot), currency, domain.NormalBalanceCredit, now)); err != nil {
+		payoutAccounts, err := router.SystemAccountIDsForShard(shardID, currency, sharding.SystemAccountRolePayoutHold)
+		if err != nil {
+			return err
+		}
+		for _, accountID := range payoutAccounts {
+			if err := ensureAccount(ctx, db, systemAccountState(accountID, currency, domain.NormalBalanceCredit, now)); err != nil {
 				return err
 			}
 		}
@@ -243,10 +246,6 @@ func systemAccountState(accountID, currency string, normalBalance domain.NormalB
 		CurrentBalances: domain.BalanceBuckets{},
 		UpdatedAt:       now,
 	}
-}
-
-func cashInClearingAccountID(shardID sharding.ShardID, currency string) string {
-	return fmt.Sprintf("%s:%s:%s", sharding.SystemAccountRoleCashIn, shardID, currency)
 }
 
 func parseUsers(value string) []string {

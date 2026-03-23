@@ -19,6 +19,7 @@ const (
 	defaultDatabaseURL      = "postgres://postgres:postgres@localhost:5432/ledger?sslmode=disable"
 	defaultTestDatabaseURL  = "postgres://postgres:postgres@localhost:5432/ledger_test?sslmode=disable"
 	defaultShardIDs         = "shard-a"
+	defaultSystemPools      = "payout_holding=4,cash_in_clearing=4"
 	defaultShutdownTimeout  = 10 * time.Second
 	defaultReadTimeout      = 5 * time.Second
 	defaultWriteTimeout     = 10 * time.Second
@@ -35,6 +36,7 @@ type Config struct {
 	DatabaseURL            string
 	TestDatabaseURL        string
 	ShardIDs               []sharding.ShardID
+	SystemAccountPoolSizes map[sharding.SystemAccountRole]int
 	WorkerShardIDs         []sharding.ShardID
 	ShardDatabaseURLs      map[sharding.ShardID]string
 	TestShardDatabaseURLs  map[sharding.ShardID]string
@@ -50,6 +52,7 @@ type Config struct {
 	KafkaAutoCreateTopic   bool
 	KafkaTopicPartitions   int
 	KafkaReplicationFactor int
+	DebugAPIEnabled        bool
 }
 
 func Load() (Config, error) {
@@ -107,8 +110,14 @@ func Load() (Config, error) {
 	if cfg.KafkaEnabled && len(cfg.KafkaBrokers) == 0 {
 		return Config{}, fmt.Errorf("KAFKA_ENABLED requires KAFKA_BROKERS")
 	}
+	cfg.DebugAPIEnabled = getBool("DEBUG_API_ENABLED", cfg.AppEnv == defaultAppEnv)
 
 	cfg.ShardIDs, err = getShardIDs("SHARD_IDS", defaultShardIDs)
+	if err != nil {
+		return Config{}, err
+	}
+
+	cfg.SystemAccountPoolSizes, err = getSystemAccountPoolSizes("SYSTEM_ACCOUNT_POOL_SIZES", defaultSystemPools)
 	if err != nil {
 		return Config{}, err
 	}
@@ -225,6 +234,43 @@ func getBool(key string, fallback bool) bool {
 	default:
 		return fallback
 	}
+}
+
+func getSystemAccountPoolSizes(key, fallback string) (map[sharding.SystemAccountRole]int, error) {
+	raw := getEnv(key, fallback)
+	if strings.TrimSpace(raw) == "" {
+		return map[sharding.SystemAccountRole]int{}, nil
+	}
+
+	values := make(map[sharding.SystemAccountRole]int)
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		roleValue, sizeValue, ok := strings.Cut(part, "=")
+		if !ok {
+			return nil, fmt.Errorf("parse %s: expected role=size entry %q", key, part)
+		}
+
+		role := sharding.SystemAccountRole(strings.TrimSpace(roleValue))
+		if err := role.Validate(); err != nil {
+			return nil, fmt.Errorf("parse %s: %w", key, err)
+		}
+
+		size, err := strconv.Atoi(strings.TrimSpace(sizeValue))
+		if err != nil {
+			return nil, fmt.Errorf("parse %s size for role %q: %w", key, role, err)
+		}
+		if size <= 0 {
+			return nil, fmt.Errorf("parse %s: pool size for role %q must be positive", key, role)
+		}
+
+		values[role] = size
+	}
+
+	return values, nil
 }
 
 func getInt(key string, fallback int) (int, error) {

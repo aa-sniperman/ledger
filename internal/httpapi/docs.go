@@ -58,10 +58,10 @@ func openAPISpec() map[string]any {
 		"tags": []map[string]any{
 			{"name": "System", "description": "Operational and documentation endpoints"},
 			{"name": "Payments", "description": "Payment-oriented async write commands"},
-			{"name": "Commands", "description": "Async command status endpoints"},
 			{"name": "Users", "description": "User-oriented balance queries"},
 			{"name": "Accounts", "description": "Account balance queries"},
 			{"name": "Transactions", "description": "Ledger transaction queries"},
+			{"name": "Debug", "description": "Development-only setup endpoints"},
 		},
 		"paths": map[string]any{
 			"/healthz": map[string]any{
@@ -119,19 +119,6 @@ func openAPISpec() map[string]any {
 					"responses":   commandResponses(),
 				},
 			},
-			"/commands/{id}": map[string]any{
-				"get": map[string]any{
-					"summary": "Get command status",
-					"tags":    []string{"Commands"},
-					"parameters": []map[string]any{
-						pathParameter("id", "Command ID"),
-					},
-					"responses": map[string]any{
-						"200": jsonResponseRef("CommandResponse", "Command status"),
-						"404": jsonResponseRef("ErrorResponse", "Command not found"),
-					},
-				},
-			},
 			"/users/{id}/balances/{currency}": map[string]any{
 				"get": map[string]any{
 					"summary": "Get current user wallet balance for a currency",
@@ -169,6 +156,18 @@ func openAPISpec() map[string]any {
 					"responses": map[string]any{
 						"200": jsonResponseRef("TransactionResponse", "Transaction detail"),
 						"404": jsonResponseRef("ErrorResponse", "Transaction not found"),
+					},
+				},
+			},
+			"/debug/devsetup/seed": map[string]any{
+				"post": map[string]any{
+					"summary":     "Seed debug users and optionally mint balances",
+					"description": "Development-only helper that creates currency-scoped user/system accounts and optionally enqueues deposit-record commands for the requested users.",
+					"tags":        []string{"Debug"},
+					"requestBody": jsonRequestBodyRef("DebugSeedRequest"),
+					"responses": map[string]any{
+						"202": jsonResponseRef("DebugSeedResponse", "Seed accepted"),
+						"400": jsonResponseRef("ErrorResponse", "Invalid debug seed request"),
 					},
 				},
 			},
@@ -270,6 +269,44 @@ func openAPISpec() map[string]any {
 						"entries": map[string]any{
 							"type":  "array",
 							"items": map[string]any{"$ref": "#/components/schemas/TransactionEntryResponse"},
+						},
+					},
+				},
+				"DebugSeedRequest": map[string]any{
+					"type":     "object",
+					"required": []string{"users", "currency"},
+					"properties": map[string]any{
+						"users": map[string]any{
+							"type":  "array",
+							"items": stringSchema("User ID"),
+						},
+						"currency":  stringSchema("Currency code"),
+						"amount":    map[string]any{"type": "integer", "format": "int64", "description": "Minor units to mint per user"},
+						"skip_mint": map[string]any{"type": "boolean", "description": "Create accounts only without enqueuing deposit commands"},
+					},
+				},
+				"DebugSeedCommandResponse": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"user_id":      stringSchema("User ID"),
+						"command_id":   stringSchema("Command ID"),
+						"idempotent":   map[string]any{"type": "boolean"},
+						"shard_id":     stringSchema("Owning shard"),
+						"command_type": stringSchema("Command type"),
+					},
+				},
+				"DebugSeedResponse": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"users": map[string]any{
+							"type":  "array",
+							"items": stringSchema("User ID"),
+						},
+						"currency":  stringSchema("Currency code"),
+						"skip_mint": map[string]any{"type": "boolean"},
+						"commands": map[string]any{
+							"type":  "array",
+							"items": map[string]any{"$ref": "#/components/schemas/DebugSeedCommandResponse"},
 						},
 					},
 				},

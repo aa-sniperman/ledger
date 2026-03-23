@@ -13,6 +13,7 @@ func TestLoadUsesDefaultTestDatabaseURL(t *testing.T) {
 	t.Setenv("DATABASE_URL", "")
 	t.Setenv("TEST_DATABASE_URL", "")
 	t.Setenv("SHARD_IDS", "")
+	t.Setenv("SYSTEM_ACCOUNT_POOL_SIZES", "")
 	t.Setenv("WORKER_SHARD_IDS", "")
 	t.Setenv("SHARD_DATABASE_URLS", "")
 	t.Setenv("TEST_SHARD_DATABASE_URLS", "")
@@ -28,6 +29,7 @@ func TestLoadUsesDefaultTestDatabaseURL(t *testing.T) {
 	t.Setenv("KAFKA_AUTO_CREATE_TOPIC", "")
 	t.Setenv("KAFKA_TOPIC_PARTITIONS", "")
 	t.Setenv("KAFKA_REPLICATION_FACTOR", "")
+	t.Setenv("DEBUG_API_ENABLED", "")
 
 	cfg, err := Load()
 	if err != nil {
@@ -43,6 +45,12 @@ func TestLoadUsesDefaultTestDatabaseURL(t *testing.T) {
 	}
 	if len(cfg.WorkerShardIDs) != 1 || string(cfg.WorkerShardIDs[0]) != "shard-a" {
 		t.Fatalf("expected default worker shard ids [shard-a], got %+v", cfg.WorkerShardIDs)
+	}
+	if cfg.SystemAccountPoolSizes["payout_holding"] != 4 || cfg.SystemAccountPoolSizes["cash_in_clearing"] != 4 {
+		t.Fatalf("expected default system account pool sizes, got %+v", cfg.SystemAccountPoolSizes)
+	}
+	if !cfg.DebugAPIEnabled {
+		t.Fatal("expected debug api to default to enabled in development")
 	}
 }
 
@@ -104,6 +112,22 @@ func TestLoadParsesShardDatabaseURLs(t *testing.T) {
 
 	if len(cfg.TestShardDatabaseURLs) != 2 || cfg.TestShardDatabaseURLs["shard-b"] != "postgres://localhost/test_b" {
 		t.Fatalf("expected parsed test shard database urls, got %+v", cfg.TestShardDatabaseURLs)
+	}
+}
+
+func TestLoadParsesSystemAccountPoolSizes(t *testing.T) {
+	t.Setenv("SYSTEM_ACCOUNT_POOL_SIZES", "payout_holding=16,cash_in_clearing=8")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("expected config load to succeed, got %v", err)
+	}
+
+	if cfg.SystemAccountPoolSizes["payout_holding"] != 16 {
+		t.Fatalf("expected payout_holding pool size 16, got %+v", cfg.SystemAccountPoolSizes)
+	}
+	if cfg.SystemAccountPoolSizes["cash_in_clearing"] != 8 {
+		t.Fatalf("expected cash_in_clearing pool size 8, got %+v", cfg.SystemAccountPoolSizes)
 	}
 }
 
@@ -198,6 +222,19 @@ func TestLoadParsesAPIIdempotencyCacheTTL(t *testing.T) {
 
 	if cfg.APIIdempotencyCacheTTL != 45*time.Second {
 		t.Fatalf("expected API idempotency cache ttl 45s, got %s", cfg.APIIdempotencyCacheTTL)
+	}
+}
+
+func TestLoadParsesDebugAPIEnabled(t *testing.T) {
+	t.Setenv("DEBUG_API_ENABLED", "false")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("expected config load to succeed, got %v", err)
+	}
+
+	if cfg.DebugAPIEnabled {
+		t.Fatal("expected debug api to be disabled")
 	}
 }
 

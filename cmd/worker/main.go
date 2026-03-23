@@ -43,9 +43,7 @@ func main() {
 		defer database.CloseMany(shardDBs)
 	}
 
-	router, err := sharding.NewRouter(cfg.ShardIDs, map[sharding.SystemAccountRole]int{
-		sharding.SystemAccountRolePayoutHold: 4,
-	})
+	router, err := sharding.NewRouter(cfg.ShardIDs, cfg.SystemAccountPoolSizes)
 	if err != nil {
 		slog.Error("build shard router", "error", err)
 		os.Exit(1)

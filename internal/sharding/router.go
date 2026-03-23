@@ -177,6 +177,37 @@ func (r Router) SystemAccountIDForShard(routingKey string, shardID ShardID, curr
 	return fmt.Sprintf("%s:%s:%s:%d", role, shardID, currency, slot), nil
 }
 
+func (r Router) SystemAccountIDsForShard(shardID ShardID, currency string, role SystemAccountRole) ([]string, error) {
+	if err := role.Validate(); err != nil {
+		return nil, err
+	}
+	if err := shardID.Validate(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(currency) == "" {
+		return nil, fmt.Errorf("currency is required")
+	}
+	if !slices.Contains(r.shardIDs, shardID) {
+		return nil, fmt.Errorf("unknown shard id %q", shardID)
+	}
+
+	poolSize := r.poolSizeForRole(role)
+	accountIDs := make([]string, 0, poolSize)
+	if poolSize == 1 {
+		return []string{fmt.Sprintf("%s:%s:%s", role, shardID, currency)}, nil
+	}
+
+	for slot := 0; slot < poolSize; slot++ {
+		accountIDs = append(accountIDs, fmt.Sprintf("%s:%s:%s:%d", role, shardID, currency, slot))
+	}
+
+	return accountIDs, nil
+}
+
+func (r Router) PoolSizeForRole(role SystemAccountRole) int {
+	return r.poolSizeForRole(role)
+}
+
 func (r Router) poolSizeForRole(role SystemAccountRole) int {
 	if size, ok := r.rolePoolSizes[role]; ok {
 		return size

@@ -2,6 +2,7 @@ package kafkabus
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -68,8 +69,13 @@ func (p *Publisher) PublishAccepted(ctx context.Context, envelope command.Envelo
 		return err
 	}
 
+	key, err := partitionKeyForEnvelope(envelope)
+	if err != nil {
+		return err
+	}
+
 	if err := p.writer.WriteMessages(ctx, kafka.Message{
-		Key:   []byte(message.ShardID),
+		Key:   []byte(key),
 		Value: payload,
 		Time:  message.PublishedAt,
 	}); err != nil {
@@ -81,4 +87,45 @@ func (p *Publisher) PublishAccepted(ctx context.Context, envelope command.Envelo
 
 func (p *Publisher) Close() error {
 	return p.writer.Close()
+}
+
+type kafkaCreateCommandPayload struct {
+	Input struct {
+		TransactionID string `json:"TransactionID"`
+	} `json:"input"`
+}
+
+type kafkaTransitionCommandPayload struct {
+	TransactionID string `json:"transaction_id"`
+}
+
+func partitionKeyForEnvelope(envelope command.Envelope) (string, error) {
+	transactionID, err := transactionIDForEnvelope(envelope)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(transactionID) == "" {
+		return string(envelope.ShardID), nil
+	}
+
+	return fmt.Sprintf("%s:tx:%s", envelope.ShardID, transactionID), nil
+}
+
+func transactionIDForEnvelope(envelope command.Envelope) (string, error) {
+	switch envelope.Type {
+	case command.TypeTransactionCreate, command.TypeWithdrawalCreate, command.TypeDepositRecord:
+		var payload kafkaCreateCommandPayload
+		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+			return "", fmt.Errorf("decode create command payload for kafka partition key: %w", err)
+		}
+		return strings.TrimSpace(payload.Input.TransactionID), nil
+	case command.TypeTransactionPost, command.TypeTransactionArchive, command.TypeWithdrawalPost, command.TypeWithdrawalArchive:
+		var payload kafkaTransitionCommandPayload
+		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+			return "", fmt.Errorf("decode transition command payload for kafka partition key: %w", err)
+		}
+		return strings.TrimSpace(payload.TransactionID), nil
+	default:
+		return "", nil
+	}
 }

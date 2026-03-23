@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sniperman/ledger/internal/config"
+	"github.com/sniperman/ledger/internal/devsetup"
 	"github.com/sniperman/ledger/internal/kafkabus"
 	"github.com/sniperman/ledger/internal/service"
 	"github.com/sniperman/ledger/internal/sharding"
@@ -18,6 +19,7 @@ type Server struct {
 	db                 *sql.DB
 	accountService     *service.AccountService
 	commandService     *service.CommandService
+	devSetupService    *devsetup.Service
 	queryService       *service.QueryService
 	transactionService *service.TransactionService
 	idempotencyCache   *idempotencyCache
@@ -35,7 +37,7 @@ func New(cfg config.Config, db *sql.DB) *Server {
 		shardIDs = []sharding.ShardID{"shard-a"}
 	}
 
-	router, err := sharding.NewRouter(shardIDs, nil)
+	router, err := sharding.NewRouter(shardIDs, cfg.SystemAccountPoolSizes)
 	if err != nil {
 		panic(err)
 	}
@@ -67,6 +69,7 @@ func NewWithRegistry(cfg config.Config, db *sql.DB, router sharding.Router, regi
 		db:                 db,
 		accountService:     service.NewAccountService(db),
 		commandService:     commandService,
+		devSetupService:    devsetup.NewService(router, registry, commandService),
 		queryService:       service.NewQueryService(db, router, registry),
 		transactionService: service.NewTransactionService(db),
 		idempotencyCache:   newIdempotencyCache(cfg.APIIdempotencyCacheTTL),
@@ -78,7 +81,6 @@ func NewWithRegistry(cfg config.Config, db *sql.DB, router sharding.Router, regi
 	mux.HandleFunc("GET /openapi.json", server.handleOpenAPI)
 	mux.HandleFunc("GET /healthz", server.handleHealth)
 	mux.HandleFunc("GET /readyz", server.handleReady)
-	mux.HandleFunc("GET /commands/{id}", server.handleGetCommand)
 	mux.HandleFunc("GET /users/{id}/balances/{currency}", server.handleGetUserBalance)
 	mux.HandleFunc("GET /accounts/{id}/balances", server.handleGetAccountBalances)
 	mux.HandleFunc("GET /transactions/{id}", server.handleGetTransaction)
@@ -86,6 +88,9 @@ func NewWithRegistry(cfg config.Config, db *sql.DB, router sharding.Router, regi
 	mux.HandleFunc("POST /commands/payments.withdrawals.post", server.handleEnqueueWithdrawalPost)
 	mux.HandleFunc("POST /commands/payments.withdrawals.archive", server.handleEnqueueWithdrawalArchive)
 	mux.HandleFunc("POST /commands/payments.deposits.record", server.handleEnqueueDepositRecord)
+	if cfg.DebugAPIEnabled {
+		mux.HandleFunc("POST /debug/devsetup/seed", server.handleDebugDevSetupSeed)
+	}
 
 	server.httpServer = &http.Server{
 		Addr:              cfg.HTTPAddr,

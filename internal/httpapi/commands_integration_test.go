@@ -44,15 +44,6 @@ func TestEnqueueWithdrawalCreateHTTPIntegration(t *testing.T) {
 		t.Fatalf("unexpected command response: %+v", accepted)
 	}
 
-	var loaded commandResponse
-	statusCode = getJSON(t, httpServer.URL+"/commands/"+accepted.CommandID, &loaded)
-	if statusCode != http.StatusOK {
-		t.Fatalf("expected 200 on command get, got %d", statusCode)
-	}
-	if loaded.CommandID != accepted.CommandID || loaded.Status != "accepted" {
-		t.Fatalf("unexpected loaded command response: %+v", loaded)
-	}
-
 	var replayed commandResponse
 	statusCode = postJSON(t, httpServer.URL+"/commands/payments.withdrawals.create", requestBody, &replayed)
 	if statusCode != http.StatusOK {

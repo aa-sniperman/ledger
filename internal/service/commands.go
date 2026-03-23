@@ -212,17 +212,24 @@ func (s *CommandService) ProcessByID(ctx context.Context, commandID string, shar
 		return command.Envelope{}, false, err
 	}
 
-	envelope, ok, err := s.store.Commands.ClaimByID(ctx, commandID, shardID, now.UTC())
-	if err != nil || !ok {
-		return envelope, ok, err
+	envelope, err := s.store.Commands.GetByID(ctx, commandID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return command.Envelope{}, false, nil
+		}
+		return command.Envelope{}, false, err
+	}
+	if envelope.ShardID != shardID {
+		return command.Envelope{}, false, fmt.Errorf("command %s belongs to shard %s, not %s", commandID, envelope.ShardID, shardID)
 	}
 
-	updatedEnvelope, err := s.processClaimed(ctx, envelope, now.UTC())
-	if err != nil {
+	if _, err := s.executeCommand(ctx, envelope); err != nil {
 		return command.Envelope{}, false, err
 	}
 
-	return updatedEnvelope, true, nil
+	envelope.Status = command.StatusSucceeded
+	envelope.UpdatedAt = now.UTC()
+	return envelope, true, nil
 }
 
 func (s *CommandService) enqueueTransition(ctx context.Context, commandType command.Type, input EnqueueTransitionCommandInput) (command.Envelope, bool, error) {

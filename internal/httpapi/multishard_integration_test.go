@@ -82,15 +82,6 @@ func TestShardAwareReadsHTTPIntegration(t *testing.T) {
 		t.Fatalf("unexpected processed command: %+v", processed)
 	}
 
-	var loaded commandResponse
-	statusCode = getJSON(t, httpServer.URL+"/commands/"+accepted.CommandID, &loaded)
-	if statusCode != http.StatusOK {
-		t.Fatalf("expected 200 on command get, got %d", statusCode)
-	}
-	if loaded.CommandID != accepted.CommandID || loaded.Status != "succeeded" {
-		t.Fatalf("unexpected loaded command response: %+v", loaded)
-	}
-
 	var balance accountBalanceResponse
 	statusCode = getJSON(t, httpServer.URL+"/users/"+userID+"/balances/USD", &balance)
 	if statusCode != http.StatusOK {

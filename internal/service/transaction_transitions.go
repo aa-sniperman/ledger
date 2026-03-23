@@ -25,8 +25,14 @@ func (s *TransactionService) transitionPendingTransaction(ctx context.Context, t
 
 	switch nextStatus {
 	case domain.TransactionStatusPosted:
+		if transaction.Status == domain.TransactionStatusPosted {
+			return transaction, nil
+		}
 		err = transaction.Post()
 	case domain.TransactionStatusArchived:
+		if transaction.Status == domain.TransactionStatusArchived {
+			return transaction, nil
+		}
 		err = transaction.Archive()
 	default:
 		err = fmt.Errorf("%w: unsupported transition target %s", domain.ErrInvalidTransition, nextStatus)

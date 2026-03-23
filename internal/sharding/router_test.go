@@ -222,3 +222,88 @@ func TestShardForAccountRoutesCurrencyScopedSystemAccount(t *testing.T) {
 		t.Fatalf("expected account shard %q, got %q", shardID, actual)
 	}
 }
+
+func TestSystemAccountIDsForShardReturnsConfiguredPool(t *testing.T) {
+	t.Parallel()
+
+	router, err := NewRouter([]ShardID{"shard-a", "shard-b"}, map[SystemAccountRole]int{
+		SystemAccountRolePayoutHold: 4,
+		SystemAccountRoleCashIn:     2,
+	})
+	if err != nil {
+		t.Fatalf("build router: %v", err)
+	}
+
+	payoutAccounts, err := router.SystemAccountIDsForShard("shard-a", "USD", SystemAccountRolePayoutHold)
+	if err != nil {
+		t.Fatalf("payout accounts: %v", err)
+	}
+	if len(payoutAccounts) != 4 {
+		t.Fatalf("expected 4 payout accounts, got %v", payoutAccounts)
+	}
+
+	cashInAccounts, err := router.SystemAccountIDsForShard("shard-a", "USD", SystemAccountRoleCashIn)
+	if err != nil {
+		t.Fatalf("cash in accounts: %v", err)
+	}
+	if len(cashInAccounts) != 2 {
+		t.Fatalf("expected 2 cash-in accounts, got %v", cashInAccounts)
+	}
+}
+
+func TestCashInPoolSpreadsUsersAcrossShardLocalSlots(t *testing.T) {
+	t.Parallel()
+
+	router, err := NewRouter([]ShardID{"shard-a", "shard-b"}, map[SystemAccountRole]int{
+		SystemAccountRoleCashIn: 4,
+	})
+	if err != nil {
+		t.Fatalf("build router: %v", err)
+	}
+
+	shardID := ShardID("shard-a")
+	slotCounts := map[string]int{
+		"0": 0,
+		"1": 0,
+		"2": 0,
+		"3": 0,
+	}
+
+	seenUsers := 0
+	for i := 1; i <= 5000 && seenUsers < 200; i++ {
+		userID := fmt.Sprintf("user_%d", i)
+		userShardID, err := router.ShardForUser(userID)
+		if err != nil {
+			t.Fatalf("route user %s: %v", userID, err)
+		}
+		if userShardID != shardID {
+			continue
+		}
+
+		accountID, systemShardID, err := router.SystemAccountForUser(userID, "USD", SystemAccountRoleCashIn)
+		if err != nil {
+			t.Fatalf("pick cash-in account for %s: %v", userID, err)
+		}
+		if systemShardID != shardID {
+			t.Fatalf("expected system shard %s, got %s", shardID, systemShardID)
+		}
+
+		parts := strings.Split(accountID, ":")
+		if len(parts) != 4 {
+			t.Fatalf("expected pooled cash-in account id, got %q", accountID)
+		}
+
+		slotCounts[parts[3]]++
+		seenUsers++
+	}
+
+	if seenUsers < 200 {
+		t.Fatalf("expected at least 200 users in shard %s, got %d", shardID, seenUsers)
+	}
+
+	for slot, count := range slotCounts {
+		if count == 0 {
+			t.Fatalf("expected slot %s to receive routed users, got counts %+v", slot, slotCounts)
+		}
+	}
+}

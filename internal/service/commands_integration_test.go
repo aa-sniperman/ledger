@@ -362,8 +362,8 @@ func TestCommandServiceProcessByIDIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("process command by id second time: %v", err)
 	}
-	if ok {
-		t.Fatal("expected already processed command not to be claimable again")
+	if !ok {
+		t.Fatal("expected duplicate processing to be harmless and return success")
 	}
 }
 
