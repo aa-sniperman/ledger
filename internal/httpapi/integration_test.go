@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,167 +12,251 @@ import (
 
 	"github.com/sniperman/ledger/internal/config"
 	"github.com/sniperman/ledger/internal/domain"
+	"github.com/sniperman/ledger/internal/service"
+	"github.com/sniperman/ledger/internal/sharding"
 	"github.com/sniperman/ledger/internal/store"
 	"github.com/sniperman/ledger/internal/testutil"
 )
 
-func TestCreateTransactionAndDuplicateHTTPIntegration(t *testing.T) {
+func TestWithdrawalCreateAndReadHTTPIntegration(t *testing.T) {
 	db := testutil.OpenTestDB(t)
 	testutil.ResetTestDB(t, db)
 	seedHTTPIntegrationAccounts(t, db)
 
+	router, err := sharding.NewRouter([]sharding.ShardID{"shard-a"}, nil)
+	if err != nil {
+		t.Fatalf("build router: %v", err)
+	}
+
 	server := New(config.Config{
 		HTTPAddr:     ":0",
+		ShardIDs:     []sharding.ShardID{"shard-a"},
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
 	}, db)
 	httpServer := httptest.NewServer(server.httpServer.Handler)
 	defer httpServer.Close()
 
-	requestBody := createTransactionRequest{
-		Flow:          "authorizing",
-		TransactionID: "tx_http_create_1",
-		PostingKey:    "pk_http_create_1",
-		Type:          "wallet_transfer_hold",
-		EffectiveAt:   time.Date(2026, 3, 21, 10, 0, 0, 0, time.UTC),
-		CreatedAt:     time.Date(2026, 3, 21, 10, 0, 1, 0, time.UTC),
-		Entries: []createTransactionEntryRequest{
-			{EntryID: "entry_http_create_1_debit", AccountID: "alice_wallet", Amount: 70, Currency: "USD", Direction: "debit"},
-			{EntryID: "entry_http_create_1_credit", AccountID: "partner_payout_holding", Amount: 70, Currency: "USD", Direction: "credit"},
-		},
+	var accepted commandResponse
+	statusCode := postJSON(t, httpServer.URL+"/commands/payments.withdrawals.create", enqueueWithdrawalCreateCommandRequest{
+		UserID:         "user_123",
+		IdempotencyKey: "idem_http_withdrawal_create_1",
+		TransactionID:  "tx_http_withdrawal_create_1",
+		PostingKey:     "pk_http_withdrawal_create_1",
+		Amount:         70,
+		Currency:       "USD",
+		EffectiveAt:    time.Date(2026, 3, 21, 10, 0, 0, 0, time.UTC),
+		CreatedAt:      time.Date(2026, 3, 21, 10, 0, 1, 0, time.UTC),
+	}, &accepted)
+	if statusCode != http.StatusAccepted {
+		t.Fatalf("expected 202 on withdrawal create, got %d", statusCode)
 	}
 
-	var created transactionResponse
-	statusCode := postJSON(t, httpServer.URL+"/transactions", requestBody, &created)
-	if statusCode != http.StatusCreated {
-		t.Fatalf("expected 201 on first create, got %d", statusCode)
-	}
-	if created.Status != string(domain.TransactionStatusPending) {
-		t.Fatalf("expected pending transaction, got %+v", created)
-	}
+	processNextSingleShardCommand(t, db, router, "shard-a")
 
-	var replayed transactionResponse
-	statusCode = postJSON(t, httpServer.URL+"/transactions", requestBody, &replayed)
+	var user accountBalanceResponse
+	statusCode = getJSON(t, httpServer.URL+"/accounts/"+sharding.UserAccountID("user_123")+"/balances", &user)
 	if statusCode != http.StatusOK {
-		t.Fatalf("expected 200 on idempotent replay, got %d", statusCode)
+		t.Fatalf("expected 200 for user balances, got %d", statusCode)
 	}
-	if replayed.TransactionID != created.TransactionID || replayed.PostingKey != created.PostingKey {
-		t.Fatalf("expected replayed transaction to match original, got created=%+v replayed=%+v", created, replayed)
+	if user.Posted != 100 || user.Pending != 30 || user.Available != 30 {
+		t.Fatalf("unexpected user balances after withdrawal create: %+v", user)
 	}
 
-	var alice accountBalanceResponse
-	statusCode = getJSON(t, httpServer.URL+"/accounts/alice_wallet/balances", &alice)
+	var loaded transactionResponse
+	statusCode = getJSON(t, httpServer.URL+"/transactions/tx_http_withdrawal_create_1", &loaded)
 	if statusCode != http.StatusOK {
-		t.Fatalf("expected 200 for alice balances, got %d", statusCode)
+		t.Fatalf("expected 200 for transaction get, got %d", statusCode)
 	}
-	if alice.Posted != 100 || alice.Pending != 30 || alice.Available != 30 {
-		t.Fatalf("unexpected alice balances after create: %+v", alice)
+	if loaded.TransactionID != "tx_http_withdrawal_create_1" || loaded.Status != string(domain.TransactionStatusPending) {
+		t.Fatalf("unexpected loaded transaction: %+v", loaded)
 	}
 }
 
-func TestPostTransactionHTTPIntegration(t *testing.T) {
+func TestWithdrawalPostHTTPIntegration(t *testing.T) {
 	db := testutil.OpenTestDB(t)
 	testutil.ResetTestDB(t, db)
 	seedHTTPIntegrationAccounts(t, db)
 
+	router, err := sharding.NewRouter([]sharding.ShardID{"shard-a"}, nil)
+	if err != nil {
+		t.Fatalf("build router: %v", err)
+	}
+
 	server := New(config.Config{
 		HTTPAddr:     ":0",
+		ShardIDs:     []sharding.ShardID{"shard-a"},
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
 	}, db)
 	httpServer := httptest.NewServer(server.httpServer.Handler)
 	defer httpServer.Close()
 
-	createPendingTransactionOverHTTP(t, httpServer.URL, "tx_http_post_1", "pk_http_post_1")
+	createPendingWithdrawalOverHTTP(t, httpServer.URL)
+	processNextSingleShardCommand(t, db, router, "shard-a")
 
-	var posted transactionResponse
-	statusCode := postJSON(t, httpServer.URL+"/transactions/tx_http_post_1/post", map[string]any{}, &posted)
-	if statusCode != http.StatusOK {
-		t.Fatalf("expected 200 on post, got %d", statusCode)
+	var accepted commandResponse
+	statusCode := postJSON(t, httpServer.URL+"/commands/payments.withdrawals.post", enqueueTransitionCommandRequest{
+		UserID:         "user_123",
+		IdempotencyKey: "idem_http_withdrawal_post_1",
+		TransactionID:  "tx_http_withdrawal_post_1",
+	}, &accepted)
+	if statusCode != http.StatusAccepted {
+		t.Fatalf("expected 202 on withdrawal post, got %d", statusCode)
 	}
-	if posted.Status != string(domain.TransactionStatusPosted) {
-		t.Fatalf("expected posted transaction, got %+v", posted)
-	}
+	processNextSingleShardCommand(t, db, router, "shard-a")
 
-	var alice accountBalanceResponse
-	statusCode = getJSON(t, httpServer.URL+"/accounts/alice_wallet/balances", &alice)
+	var user accountBalanceResponse
+	statusCode = getJSON(t, httpServer.URL+"/accounts/"+sharding.UserAccountID("user_123")+"/balances", &user)
 	if statusCode != http.StatusOK {
-		t.Fatalf("expected 200 for alice balances, got %d", statusCode)
+		t.Fatalf("expected 200 for user balances, got %d", statusCode)
 	}
-	if alice.Posted != 30 || alice.Pending != 30 || alice.Available != 30 {
-		t.Fatalf("unexpected alice balances after post: %+v", alice)
+	if user.Posted != 30 || user.Pending != 30 || user.Available != 30 {
+		t.Fatalf("unexpected user balances after withdrawal post: %+v", user)
 	}
 
 	var holding accountBalanceResponse
-	statusCode = getJSON(t, httpServer.URL+"/accounts/partner_payout_holding/balances", &holding)
+	statusCode = getJSON(t, httpServer.URL+"/accounts/payout_holding:shard-a/balances", &holding)
 	if statusCode != http.StatusOK {
 		t.Fatalf("expected 200 for holding balances, got %d", statusCode)
 	}
 	if holding.Posted != 70 || holding.Pending != 70 || holding.Available != 70 {
-		t.Fatalf("unexpected holding balances after post: %+v", holding)
+		t.Fatalf("unexpected holding balances after withdrawal post: %+v", holding)
 	}
 }
 
-func TestArchiveTransactionHTTPIntegration(t *testing.T) {
+func TestWithdrawalArchiveHTTPIntegration(t *testing.T) {
 	db := testutil.OpenTestDB(t)
 	testutil.ResetTestDB(t, db)
 	seedHTTPIntegrationAccounts(t, db)
 
+	router, err := sharding.NewRouter([]sharding.ShardID{"shard-a"}, nil)
+	if err != nil {
+		t.Fatalf("build router: %v", err)
+	}
+
 	server := New(config.Config{
 		HTTPAddr:     ":0",
+		ShardIDs:     []sharding.ShardID{"shard-a"},
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
 	}, db)
 	httpServer := httptest.NewServer(server.httpServer.Handler)
 	defer httpServer.Close()
 
-	createPendingTransactionOverHTTP(t, httpServer.URL, "tx_http_archive_1", "pk_http_archive_1")
+	createPendingWithdrawalOverHTTP(t, httpServer.URL)
+	processNextSingleShardCommand(t, db, router, "shard-a")
 
-	var archived transactionResponse
-	statusCode := postJSON(t, httpServer.URL+"/transactions/tx_http_archive_1/archive", map[string]any{}, &archived)
-	if statusCode != http.StatusOK {
-		t.Fatalf("expected 200 on archive, got %d", statusCode)
+	var accepted commandResponse
+	statusCode := postJSON(t, httpServer.URL+"/commands/payments.withdrawals.archive", enqueueTransitionCommandRequest{
+		UserID:         "user_123",
+		IdempotencyKey: "idem_http_withdrawal_archive_1",
+		TransactionID:  "tx_http_withdrawal_post_1",
+	}, &accepted)
+	if statusCode != http.StatusAccepted {
+		t.Fatalf("expected 202 on withdrawal archive, got %d", statusCode)
 	}
-	if archived.Status != string(domain.TransactionStatusArchived) {
-		t.Fatalf("expected archived transaction, got %+v", archived)
-	}
+	processNextSingleShardCommand(t, db, router, "shard-a")
 
-	var alice accountBalanceResponse
-	statusCode = getJSON(t, httpServer.URL+"/accounts/alice_wallet/balances", &alice)
+	var user accountBalanceResponse
+	statusCode = getJSON(t, httpServer.URL+"/accounts/"+sharding.UserAccountID("user_123")+"/balances", &user)
 	if statusCode != http.StatusOK {
-		t.Fatalf("expected 200 for alice balances, got %d", statusCode)
+		t.Fatalf("expected 200 for user balances, got %d", statusCode)
 	}
-	if alice.Posted != 100 || alice.Pending != 100 || alice.Available != 100 {
-		t.Fatalf("unexpected alice balances after archive: %+v", alice)
+	if user.Posted != 100 || user.Pending != 100 || user.Available != 100 {
+		t.Fatalf("unexpected user balances after withdrawal archive: %+v", user)
 	}
 
 	var holding accountBalanceResponse
-	statusCode = getJSON(t, httpServer.URL+"/accounts/partner_payout_holding/balances", &holding)
+	statusCode = getJSON(t, httpServer.URL+"/accounts/payout_holding:shard-a/balances", &holding)
 	if statusCode != http.StatusOK {
 		t.Fatalf("expected 200 for holding balances, got %d", statusCode)
 	}
 	if holding.Posted != 0 || holding.Pending != 0 || holding.Available != 0 {
-		t.Fatalf("unexpected holding balances after archive: %+v", holding)
+		t.Fatalf("unexpected holding balances after withdrawal archive: %+v", holding)
 	}
 }
 
-func createPendingTransactionOverHTTP(t *testing.T, baseURL, transactionID, postingKey string) {
+func TestDepositRecordHTTPIntegration(t *testing.T) {
+	db := testutil.OpenTestDB(t)
+	testutil.ResetTestDB(t, db)
+	seedHTTPIntegrationAccounts(t, db)
+
+	router, err := sharding.NewRouter([]sharding.ShardID{"shard-a"}, nil)
+	if err != nil {
+		t.Fatalf("build router: %v", err)
+	}
+
+	server := New(config.Config{
+		HTTPAddr:     ":0",
+		ShardIDs:     []sharding.ShardID{"shard-a"},
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+	}, db)
+	httpServer := httptest.NewServer(server.httpServer.Handler)
+	defer httpServer.Close()
+
+	var accepted commandResponse
+	statusCode := postJSON(t, httpServer.URL+"/commands/payments.deposits.record", enqueueDepositRecordCommandRequest{
+		UserID:         "user_123",
+		IdempotencyKey: "idem_http_deposit_record_1",
+		TransactionID:  "tx_http_deposit_record_1",
+		PostingKey:     "pk_http_deposit_record_1",
+		Amount:         50,
+		Currency:       "USD",
+		EffectiveAt:    time.Date(2026, 3, 21, 11, 0, 0, 0, time.UTC),
+		CreatedAt:      time.Date(2026, 3, 21, 11, 0, 1, 0, time.UTC),
+	}, &accepted)
+	if statusCode != http.StatusAccepted {
+		t.Fatalf("expected 202 on deposit record, got %d", statusCode)
+	}
+	processNextSingleShardCommand(t, db, router, "shard-a")
+
+	var user accountBalanceResponse
+	statusCode = getJSON(t, httpServer.URL+"/accounts/"+sharding.UserAccountID("user_123")+"/balances", &user)
+	if statusCode != http.StatusOK {
+		t.Fatalf("expected 200 for user balances, got %d", statusCode)
+	}
+	if user.Posted != 150 || user.Pending != 150 || user.Available != 150 {
+		t.Fatalf("unexpected user balances after deposit record: %+v", user)
+	}
+
+	var clearing accountBalanceResponse
+	statusCode = getJSON(t, httpServer.URL+"/accounts/cash_in_clearing:shard-a/balances", &clearing)
+	if statusCode != http.StatusOK {
+		t.Fatalf("expected 200 for clearing balances, got %d", statusCode)
+	}
+	if clearing.Posted != 50 || clearing.Pending != 50 || clearing.Available != 50 {
+		t.Fatalf("unexpected clearing balances after deposit record: %+v", clearing)
+	}
+}
+
+func createPendingWithdrawalOverHTTP(t *testing.T, baseURL string) {
 	t.Helper()
 
-	statusCode := postJSON(t, baseURL+"/transactions", createTransactionRequest{
-		Flow:          "authorizing",
-		TransactionID: transactionID,
-		PostingKey:    postingKey,
-		Type:          "wallet_transfer_hold",
-		EffectiveAt:   time.Date(2026, 3, 21, 10, 0, 0, 0, time.UTC),
-		CreatedAt:     time.Date(2026, 3, 21, 10, 0, 1, 0, time.UTC),
-		Entries: []createTransactionEntryRequest{
-			{EntryID: transactionID + "_debit", AccountID: "alice_wallet", Amount: 70, Currency: "USD", Direction: "debit"},
-			{EntryID: transactionID + "_credit", AccountID: "partner_payout_holding", Amount: 70, Currency: "USD", Direction: "credit"},
-		},
+	statusCode := postJSON(t, baseURL+"/commands/payments.withdrawals.create", enqueueWithdrawalCreateCommandRequest{
+		UserID:         "user_123",
+		IdempotencyKey: "idem_http_withdrawal_create_pending",
+		TransactionID:  "tx_http_withdrawal_post_1",
+		PostingKey:     "pk_http_withdrawal_post_1",
+		Amount:         70,
+		Currency:       "USD",
+		EffectiveAt:    time.Date(2026, 3, 21, 10, 0, 0, 0, time.UTC),
+		CreatedAt:      time.Date(2026, 3, 21, 10, 0, 1, 0, time.UTC),
 	}, nil)
-	if statusCode != http.StatusCreated {
-		t.Fatalf("expected pending transaction seed create to return 201, got %d", statusCode)
+	if statusCode != http.StatusAccepted {
+		t.Fatalf("expected withdrawal create enqueue to return 202, got %d", statusCode)
+	}
+}
+
+func processNextSingleShardCommand(t *testing.T, db *sql.DB, router sharding.Router, shardID sharding.ShardID) {
+	t.Helper()
+
+	commandService := service.NewCommandService(db, router, nil)
+	if _, ok, err := commandService.ProcessNext(context.Background(), shardID, time.Now().UTC()); err != nil {
+		t.Fatalf("process next command: %v", err)
+	} else if !ok {
+		t.Fatal("expected queued command to be processed")
 	}
 }
 
@@ -221,47 +306,53 @@ func seedHTTPIntegrationAccounts(t *testing.T, db store.DBTX) {
 
 	ctx := context.Background()
 	repos := store.NewRepositories(db)
+	now := time.Date(2026, 3, 21, 9, 0, 0, 0, time.UTC)
 
 	accounts := []domain.AccountState{
 		{
 			Account: domain.Account{
-				ID:            "alice_wallet",
+				ID:            sharding.UserAccountID("user_123"),
 				Currency:      "USD",
 				NormalBalance: domain.NormalBalanceCredit,
-				CreatedAt:     time.Date(2026, 3, 21, 9, 0, 0, 0, time.UTC),
-				UpdatedAt:     time.Date(2026, 3, 21, 9, 0, 0, 0, time.UTC),
+				CreatedAt:     now,
+				UpdatedAt:     now,
 			},
 			CurrentVersion: 10,
 			CurrentBalances: domain.BalanceBuckets{
-				PostedDebits:   0,
 				PostedCredits:  100,
-				PendingDebits:  0,
 				PendingCredits: 100,
 			},
-			UpdatedAt: time.Date(2026, 3, 21, 9, 0, 0, 0, time.UTC),
+			UpdatedAt: now,
 		},
 		{
 			Account: domain.Account{
-				ID:            "partner_payout_holding",
+				ID:            "payout_holding:shard-a",
 				Currency:      "USD",
 				NormalBalance: domain.NormalBalanceCredit,
-				CreatedAt:     time.Date(2026, 3, 21, 9, 0, 0, 0, time.UTC),
-				UpdatedAt:     time.Date(2026, 3, 21, 9, 0, 0, 0, time.UTC),
+				CreatedAt:     now,
+				UpdatedAt:     now,
 			},
-			CurrentVersion: 3,
-			CurrentBalances: domain.BalanceBuckets{
-				PostedDebits:   0,
-				PostedCredits:  0,
-				PendingDebits:  0,
-				PendingCredits: 0,
+			CurrentVersion:  0,
+			CurrentBalances: domain.BalanceBuckets{},
+			UpdatedAt:       now,
+		},
+		{
+			Account: domain.Account{
+				ID:            "cash_in_clearing:shard-a",
+				Currency:      "USD",
+				NormalBalance: domain.NormalBalanceDebit,
+				CreatedAt:     now,
+				UpdatedAt:     now,
 			},
-			UpdatedAt: time.Date(2026, 3, 21, 9, 0, 0, 0, time.UTC),
+			CurrentVersion:  0,
+			CurrentBalances: domain.BalanceBuckets{},
+			UpdatedAt:       now,
 		},
 	}
 
 	for _, account := range accounts {
 		if err := repos.Accounts.Create(ctx, account); err != nil {
-			t.Fatalf("seed account %s: %v", account.Account.ID, err)
+			t.Fatalf("seed HTTP integration account %s: %v", account.Account.ID, err)
 		}
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	_ "github.com/jackc/pgx/v4/stdlib"
+	"github.com/sniperman/ledger/internal/sharding"
 )
 
 const driverName = "pgx"
@@ -28,4 +29,25 @@ func Open(ctx context.Context, databaseURL string) (*sql.DB, error) {
 	}
 
 	return db, nil
+}
+
+func OpenMany(ctx context.Context, urls map[sharding.ShardID]string) (map[sharding.ShardID]*sql.DB, error) {
+	dbs := make(map[sharding.ShardID]*sql.DB, len(urls))
+
+	for shardID, url := range urls {
+		db, err := Open(ctx, url)
+		if err != nil {
+			CloseMany(dbs)
+			return nil, fmt.Errorf("open shard db %s: %w", shardID, err)
+		}
+		dbs[shardID] = db
+	}
+
+	return dbs, nil
+}
+
+func CloseMany(dbs map[sharding.ShardID]*sql.DB) {
+	for _, db := range dbs {
+		_ = db.Close()
+	}
 }

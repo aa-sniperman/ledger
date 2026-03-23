@@ -103,6 +103,29 @@ func (s *Server) handlePostTransaction(w http.ResponseWriter, r *http.Request) {
 	s.handleTransitionTransaction(w, r, domain.TransactionStatusPosted)
 }
 
+func (s *Server) handleGetTransaction(w http.ResponseWriter, r *http.Request) {
+	transactionID := r.PathValue("id")
+	if transactionID == "" {
+		writeError(w, http.StatusBadRequest, "transaction id is required")
+		return
+	}
+
+	transaction, err := s.queryService.GetTransaction(r.Context(), transactionID)
+	if err != nil {
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			writeError(w, http.StatusNotFound, err.Error())
+		case isClientError(err):
+			writeError(w, http.StatusBadRequest, err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, "internal server error")
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusOK, toTransactionResponse(transaction))
+}
+
 func (s *Server) handleArchiveTransaction(w http.ResponseWriter, r *http.Request) {
 	s.handleTransitionTransaction(w, r, domain.TransactionStatusArchived)
 }

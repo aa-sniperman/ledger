@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"github.com/sniperman/ledger/internal/config"
 	"github.com/sniperman/ledger/internal/database"
 	"github.com/sniperman/ledger/internal/httpapi"
+	"github.com/sniperman/ledger/internal/sharding"
 )
 
 func main() {
@@ -31,7 +33,30 @@ func main() {
 	}
 	defer db.Close()
 
+	var shardDBs map[sharding.ShardID]*sql.DB
+	if len(cfg.ShardDatabaseURLs) > 0 {
+		shardDBs, err = database.OpenMany(ctx, cfg.ShardDatabaseURLs)
+		if err != nil {
+			slog.Error("open shard databases", "error", err)
+			os.Exit(1)
+		}
+		defer database.CloseMany(shardDBs)
+	}
+
 	server := httpapi.New(cfg, db)
+	if len(shardDBs) > 0 {
+		router, err := sharding.NewRouter(cfg.ShardIDs, nil)
+		if err != nil {
+			slog.Error("build shard router", "error", err)
+			os.Exit(1)
+		}
+		registry, err := sharding.NewDBRegistry(shardDBs)
+		if err != nil {
+			slog.Error("build shard registry", "error", err)
+			os.Exit(1)
+		}
+		server = httpapi.NewWithRegistry(cfg, db, router, registry)
+	}
 
 	go func() {
 		<-ctx.Done()

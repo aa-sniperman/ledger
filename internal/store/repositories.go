@@ -12,13 +12,17 @@ type DBTX interface {
 }
 
 type Repositories struct {
-	Accounts     *AccountRepository
-	Transactions *TransactionRepository
+	Commands            *CommandRepository
+	Accounts            *AccountRepository
+	Transactions        *TransactionRepository
+	TransactionLocators *TransactionLocatorRepository
 }
 
 func NewRepositories(db DBTX) Repositories {
 	return Repositories{
-		Accounts:     NewAccountRepository(db),
-		Transactions: NewTransactionRepository(db),
+		Commands:            NewCommandRepository(db),
+		Accounts:            NewAccountRepository(db),
+		Transactions:        NewTransactionRepository(db),
+		TransactionLocators: NewTransactionLocatorRepository(db),
 	}
 }
