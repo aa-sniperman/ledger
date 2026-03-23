@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -233,15 +234,18 @@ func (s *CommandService) ProcessByID(ctx context.Context, commandID string, shar
 }
 
 func (s *CommandService) ProcessEnvelope(ctx context.Context, envelope command.Envelope, now time.Time) (command.Envelope, bool, error) {
+	start := time.Now()
 	if err := envelope.Validate(); err != nil {
 		return command.Envelope{}, false, err
 	}
 	if _, err := s.executeCommand(ctx, envelope); err != nil {
+		slog.Error("command execution failed", "command_id", envelope.CommandID, "type", envelope.Type, "shard_id", envelope.ShardID, "duration", time.Since(start), "error", err)
 		return command.Envelope{}, false, err
 	}
 
 	envelope.Status = command.StatusSucceeded
 	envelope.UpdatedAt = now.UTC()
+	slog.Info("command execution succeeded", "command_id", envelope.CommandID, "type", envelope.Type, "shard_id", envelope.ShardID, "duration", time.Since(start))
 	return envelope, true, nil
 }
 
@@ -265,6 +269,7 @@ func (s *CommandService) enqueueTransition(ctx context.Context, commandType comm
 }
 
 func (s *CommandService) enqueue(ctx context.Context, shardID sharding.ShardID, commandType command.Type, idempotencyKey string, payload any) (command.Envelope, bool, error) {
+	start := time.Now()
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
 		return command.Envelope{}, false, fmt.Errorf("marshal command payload: %w", err)
@@ -287,16 +292,21 @@ func (s *CommandService) enqueue(ctx context.Context, shardID sharding.ShardID, 
 		UpdatedAt:      now,
 	}
 
+	insertStart := time.Now()
 	if err := s.store.Commands.Create(ctx, envelope); err != nil {
 		if store.IsUniqueViolation(err) {
 			existing, lookupErr := s.store.Commands.GetByTypeAndIdempotencyKey(ctx, commandType, idempotencyKey)
 			if lookupErr == nil {
+				slog.Info("command enqueue deduplicated", "command_type", commandType, "idempotency_key", idempotencyKey, "existing_command_id", existing.CommandID, "duration", time.Since(start))
 				return existing, true, nil
 			}
 		}
 		return command.Envelope{}, false, err
 	}
+	insertDuration := time.Since(insertStart)
+	slog.Info("command accepted persisted", "command_id", envelope.CommandID, "command_type", commandType, "shard_id", shardID, "insert_duration", insertDuration)
 
+	publishStart := time.Now()
 	if err := s.publisher.PublishAccepted(ctx, envelope); err != nil {
 		deleteErr := s.store.Commands.DeleteByID(ctx, envelope.CommandID)
 		if deleteErr != nil && !errors.Is(deleteErr, store.ErrNotFound) {
@@ -304,6 +314,8 @@ func (s *CommandService) enqueue(ctx context.Context, shardID sharding.ShardID, 
 		}
 		return command.Envelope{}, false, fmt.Errorf("publish command %s: %w", envelope.CommandID, err)
 	}
+	publishDuration := time.Since(publishStart)
+	slog.Info("command enqueue completed", "command_id", envelope.CommandID, "command_type", commandType, "shard_id", shardID, "insert_duration", insertDuration, "publish_duration", publishDuration, "total_duration", time.Since(start))
 
 	return envelope, false, nil
 }
@@ -326,6 +338,7 @@ func (s *CommandService) processClaimed(ctx context.Context, envelope command.En
 }
 
 func (s *CommandService) executeCommand(ctx context.Context, envelope command.Envelope) ([]byte, error) {
+	start := time.Now()
 	switch envelope.Type {
 	case command.TypeTransactionCreate, command.TypeWithdrawalCreate, command.TypeDepositRecord:
 		var payload createTransactionCommandPayload
@@ -340,11 +353,13 @@ func (s *CommandService) executeCommand(ctx context.Context, envelope command.En
 
 		transaction, _, err := NewTransactionService(shardDB).Create(ctx, payload.Input)
 		if err != nil {
+			slog.Error("ledger command create execution failed", "command_id", envelope.CommandID, "type", envelope.Type, "shard_id", envelope.ShardID, "duration", time.Since(start), "error", err)
 			return nil, err
 		}
 		if err := s.store.TransactionLocators.Create(ctx, transaction.ID, envelope.ShardID, time.Now().UTC()); err != nil {
 			return nil, err
 		}
+		slog.Info("ledger command create executed", "command_id", envelope.CommandID, "type", envelope.Type, "shard_id", envelope.ShardID, "transaction_id", transaction.ID, "status", transaction.Status, "duration", time.Since(start))
 
 		return json.Marshal(struct {
 			TransactionID string `json:"transaction_id"`
@@ -366,8 +381,10 @@ func (s *CommandService) executeCommand(ctx context.Context, envelope command.En
 
 		transaction, err := NewTransactionService(shardDB).Post(ctx, payload.TransactionID)
 		if err != nil {
+			slog.Error("ledger command post execution failed", "command_id", envelope.CommandID, "type", envelope.Type, "shard_id", envelope.ShardID, "transaction_id", payload.TransactionID, "duration", time.Since(start), "error", err)
 			return nil, err
 		}
+		slog.Info("ledger command post executed", "command_id", envelope.CommandID, "type", envelope.Type, "shard_id", envelope.ShardID, "transaction_id", transaction.ID, "status", transaction.Status, "duration", time.Since(start))
 
 		return json.Marshal(struct {
 			TransactionID string `json:"transaction_id"`
@@ -389,8 +406,10 @@ func (s *CommandService) executeCommand(ctx context.Context, envelope command.En
 
 		transaction, err := NewTransactionService(shardDB).Archive(ctx, payload.TransactionID)
 		if err != nil {
+			slog.Error("ledger command archive execution failed", "command_id", envelope.CommandID, "type", envelope.Type, "shard_id", envelope.ShardID, "transaction_id", payload.TransactionID, "duration", time.Since(start), "error", err)
 			return nil, err
 		}
+		slog.Info("ledger command archive executed", "command_id", envelope.CommandID, "type", envelope.Type, "shard_id", envelope.ShardID, "transaction_id", transaction.ID, "status", transaction.Status, "duration", time.Since(start))
 
 		return json.Marshal(struct {
 			TransactionID string `json:"transaction_id"`

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -59,6 +60,7 @@ func NewPublisherWithWriter(topic string, writer kafkaMessageWriter) (*Publisher
 }
 
 func (p *Publisher) PublishAccepted(ctx context.Context, envelope command.Envelope) error {
+	start := time.Now()
 	message, err := MessageFromEnvelope(envelope, p.now())
 	if err != nil {
 		return err
@@ -81,6 +83,8 @@ func (p *Publisher) PublishAccepted(ctx context.Context, envelope command.Envelo
 	}); err != nil {
 		return fmt.Errorf("publish kafka command %s: %w", envelope.CommandID, err)
 	}
+
+	slog.Info("published kafka command", "command_id", envelope.CommandID, "type", envelope.Type, "shard_id", envelope.ShardID, "partition_key", key, "topic", p.topic, "duration", time.Since(start))
 
 	return nil
 }

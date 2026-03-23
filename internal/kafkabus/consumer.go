@@ -154,9 +154,11 @@ func (c *Consumer) Run(ctx context.Context) error {
 		}
 
 		partitionCh := getPartitionChan(message.Partition)
+		dispatchStart := time.Now()
 
 		select {
 		case partitionCh <- partitionMessage{message: message, accepted: accepted}:
+			c.logger.Info("dispatched kafka command", "partition", message.Partition, "offset", message.Offset, "shard_id", accepted.Envelope.ShardID, "command_id", accepted.Envelope.CommandID, "message_age", time.Since(accepted.PublishedAt), "dispatch_duration", time.Since(dispatchStart))
 		case <-runCtx.Done():
 			closePartitionChans(partitionChans, &mu)
 			wg.Wait()
@@ -180,6 +182,7 @@ func (c *Consumer) runPartitionWorker(ctx context.Context, partition int, messag
 				return
 			}
 
+			processStart := time.Now()
 			envelope, processed, err := c.processor.ProcessEnvelope(ctx, partitionMessage.accepted.Envelope, c.now())
 			if err != nil {
 				reportErr(fmt.Errorf("process kafka command %s on partition %d: %w", partitionMessage.accepted.Envelope.CommandID, partition, err))
@@ -190,13 +193,14 @@ func (c *Consumer) runPartitionWorker(ctx context.Context, partition int, messag
 				reportErr(fmt.Errorf("commit kafka message %s on partition %d: %w", partitionMessage.accepted.Envelope.CommandID, partition, commitErr))
 				return
 			}
+			totalDuration := time.Since(processStart)
 
 			if processed {
-				c.logger.Info("processed kafka command", "partition", partition, "shard_id", partitionMessage.accepted.Envelope.ShardID, "command_id", envelope.CommandID, "type", envelope.Type, "status", envelope.Status)
+				c.logger.Info("processed kafka command", "partition", partition, "offset", partitionMessage.message.Offset, "shard_id", partitionMessage.accepted.Envelope.ShardID, "command_id", envelope.CommandID, "type", envelope.Type, "status", envelope.Status, "execution_duration", totalDuration)
 				continue
 			}
 
-			c.logger.Info("skipped kafka command", "partition", partition, "shard_id", partitionMessage.accepted.Envelope.ShardID, "command_id", partitionMessage.accepted.Envelope.CommandID)
+			c.logger.Info("skipped kafka command", "partition", partition, "offset", partitionMessage.message.Offset, "shard_id", partitionMessage.accepted.Envelope.ShardID, "command_id", partitionMessage.accepted.Envelope.CommandID, "execution_duration", totalDuration)
 		}
 	}
 }

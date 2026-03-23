@@ -67,6 +67,7 @@ type commandResponse struct {
 }
 
 func (s *Server) handleEnqueueTransactionCreate(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
 	var request enqueueCreateTransactionCommandRequest
 	if !decodeJSONBody(w, r, &request) {
 		return
@@ -97,21 +98,24 @@ func (s *Server) handleEnqueueTransactionCreate(w http.ResponseWriter, r *http.R
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		slog.Error("enqueue transaction create command", "user_id", request.UserID, "idempotency_key", request.IdempotencyKey, "transaction_id", request.TransactionID, "error", err)
+		slog.Error("enqueue transaction create command", "user_id", request.UserID, "idempotency_key", request.IdempotencyKey, "transaction_id", request.TransactionID, "error", err, "duration", time.Since(start))
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
+	slog.Info("api transaction create accepted", "user_id", request.UserID, "command_id", envelope.CommandID, "transaction_id", request.TransactionID, "shard_id", envelope.ShardID, "idempotent", idempotent, "duration", time.Since(start))
 	writeCommandResponse(w, envelope, idempotent)
 }
 
 func (s *Server) handleEnqueueWithdrawalCreate(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
 	var request enqueueWithdrawalCreateCommandRequest
 	if !decodeJSONBody(w, r, &request) {
 		return
 	}
 
 	if envelope, ok := s.idempotencyCache.Get(command.TypeWithdrawalCreate, request.IdempotencyKey); ok {
+		slog.Info("api withdrawal create cache hit", "user_id", request.UserID, "command_id", envelope.CommandID, "transaction_id", request.TransactionID, "duration", time.Since(start))
 		writeCommandResponse(w, envelope, true)
 		return
 	}
@@ -131,12 +135,13 @@ func (s *Server) handleEnqueueWithdrawalCreate(w http.ResponseWriter, r *http.Re
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		slog.Error("enqueue withdrawal create command", "user_id", request.UserID, "idempotency_key", request.IdempotencyKey, "transaction_id", request.TransactionID, "currency", request.Currency, "error", err)
+		slog.Error("enqueue withdrawal create command", "user_id", request.UserID, "idempotency_key", request.IdempotencyKey, "transaction_id", request.TransactionID, "currency", request.Currency, "error", err, "duration", time.Since(start))
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
 	s.idempotencyCache.Put(command.TypeWithdrawalCreate, request.IdempotencyKey, envelope)
+	slog.Info("api withdrawal create accepted", "user_id", request.UserID, "command_id", envelope.CommandID, "transaction_id", request.TransactionID, "shard_id", envelope.ShardID, "currency", request.Currency, "idempotent", idempotent, "duration", time.Since(start))
 	writeCommandResponse(w, envelope, idempotent)
 }
 
@@ -149,12 +154,14 @@ func (s *Server) handleEnqueueWithdrawalArchive(w http.ResponseWriter, r *http.R
 }
 
 func (s *Server) handleEnqueueDepositRecord(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
 	var request enqueueDepositRecordCommandRequest
 	if !decodeJSONBody(w, r, &request) {
 		return
 	}
 
 	if envelope, ok := s.idempotencyCache.Get(command.TypeDepositRecord, request.IdempotencyKey); ok {
+		slog.Info("api deposit record cache hit", "user_id", request.UserID, "command_id", envelope.CommandID, "transaction_id", request.TransactionID, "duration", time.Since(start))
 		writeCommandResponse(w, envelope, true)
 		return
 	}
@@ -174,12 +181,13 @@ func (s *Server) handleEnqueueDepositRecord(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		slog.Error("enqueue deposit record command", "user_id", request.UserID, "idempotency_key", request.IdempotencyKey, "transaction_id", request.TransactionID, "currency", request.Currency, "error", err)
+		slog.Error("enqueue deposit record command", "user_id", request.UserID, "idempotency_key", request.IdempotencyKey, "transaction_id", request.TransactionID, "currency", request.Currency, "error", err, "duration", time.Since(start))
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
 	s.idempotencyCache.Put(command.TypeDepositRecord, request.IdempotencyKey, envelope)
+	slog.Info("api deposit record accepted", "user_id", request.UserID, "command_id", envelope.CommandID, "transaction_id", request.TransactionID, "shard_id", envelope.ShardID, "currency", request.Currency, "idempotent", idempotent, "duration", time.Since(start))
 	writeCommandResponse(w, envelope, idempotent)
 }
 
@@ -192,12 +200,14 @@ func (s *Server) handleEnqueueTransactionArchive(w http.ResponseWriter, r *http.
 }
 
 func (s *Server) handleEnqueueTransition(w http.ResponseWriter, r *http.Request, commandType command.Type) {
+	start := time.Now()
 	var request enqueueTransitionCommandRequest
 	if !decodeJSONBody(w, r, &request) {
 		return
 	}
 
 	if envelope, ok := s.idempotencyCache.Get(commandType, request.IdempotencyKey); ok {
+		slog.Info("api transition cache hit", "type", commandType, "user_id", request.UserID, "command_id", envelope.CommandID, "transaction_id", request.TransactionID, "duration", time.Since(start))
 		writeCommandResponse(w, envelope, true)
 		return
 	}
@@ -233,12 +243,13 @@ func (s *Server) handleEnqueueTransition(w http.ResponseWriter, r *http.Request,
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		slog.Error("enqueue transition command", "user_id", request.UserID, "idempotency_key", request.IdempotencyKey, "transaction_id", request.TransactionID, "type", commandType, "error", err)
+		slog.Error("enqueue transition command", "user_id", request.UserID, "idempotency_key", request.IdempotencyKey, "transaction_id", request.TransactionID, "type", commandType, "error", err, "duration", time.Since(start))
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
 	s.idempotencyCache.Put(commandType, request.IdempotencyKey, envelope)
+	slog.Info("api transition accepted", "type", commandType, "user_id", request.UserID, "command_id", envelope.CommandID, "transaction_id", request.TransactionID, "shard_id", envelope.ShardID, "idempotent", idempotent, "duration", time.Since(start))
 	writeCommandResponse(w, envelope, idempotent)
 }
 

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/sniperman/ledger/internal/domain"
@@ -46,29 +47,23 @@ func NewTransactionService(db *sql.DB) *TransactionService {
 }
 
 func (s *TransactionService) Create(ctx context.Context, input CreateTransactionInput) (domain.Transaction, bool, error) {
+	start := time.Now()
 	transaction, err := buildTransaction(input)
 	if err != nil {
 		return domain.Transaction{}, false, err
 	}
 
-	accountIDs := collectAccountIDs(transaction.Entries)
-	accountStates, err := store.NewRepositories(s.db).Accounts.GetByIDs(ctx, accountIDs)
-	if err != nil {
-		return domain.Transaction{}, false, err
-	}
-
-	if err := transaction.ValidateAccounts(accountStates); err != nil {
-		return domain.Transaction{}, false, err
-	}
-
+	preflightStart := time.Now()
 	changes, err := buildBalanceChanges(transaction)
 	if err != nil {
 		return domain.Transaction{}, false, err
 	}
+	preflightDuration := time.Since(preflightStart)
 
 	var result domain.Transaction
 	var idempotent bool
 
+	txStart := time.Now()
 	err = store.InTx(ctx, s.db, func(repos store.Repositories) error {
 		versions, err := repos.Accounts.ApplyBalanceChanges(ctx, changes, input.Flow == TransactionFlowAuthorizing, transaction.CreatedAt)
 		if err != nil {
@@ -84,10 +79,12 @@ func (s *TransactionService) Create(ctx context.Context, input CreateTransaction
 		result = transaction
 		return nil
 	})
+	txDuration := time.Since(txStart)
 	if err != nil {
 		if input.Flow == TransactionFlowAuthorizing && isPotentialIdempotentReplayError(err) {
 			existing, lookupErr := store.NewRepositories(s.db).Transactions.GetByPostingKey(ctx, transaction.PostingKey)
 			if lookupErr == nil {
+				slog.Info("ledger transaction create replayed", "transaction_id", existing.ID, "posting_key", existing.PostingKey, "flow", input.Flow, "preflight_duration", preflightDuration, "db_tx_duration", txDuration, "total_duration", time.Since(start))
 				return existing, true, nil
 			}
 		}
@@ -95,13 +92,16 @@ func (s *TransactionService) Create(ctx context.Context, input CreateTransaction
 		if store.IsUniqueViolation(err) {
 			existing, lookupErr := store.NewRepositories(s.db).Transactions.GetByPostingKey(ctx, transaction.PostingKey)
 			if lookupErr == nil {
+				slog.Info("ledger transaction create replayed", "transaction_id", existing.ID, "posting_key", existing.PostingKey, "flow", input.Flow, "preflight_duration", preflightDuration, "db_tx_duration", txDuration, "total_duration", time.Since(start))
 				return existing, true, nil
 			}
 		}
 
+		slog.Error("ledger transaction create failed", "transaction_id", transaction.ID, "posting_key", transaction.PostingKey, "flow", input.Flow, "preflight_duration", preflightDuration, "db_tx_duration", txDuration, "total_duration", time.Since(start), "error", err)
 		return domain.Transaction{}, false, err
 	}
 
+	slog.Info("ledger transaction created", "transaction_id", result.ID, "posting_key", result.PostingKey, "flow", input.Flow, "status", result.Status, "preflight_duration", preflightDuration, "db_tx_duration", txDuration, "total_duration", time.Since(start))
 	return result, idempotent, nil
 }
 
