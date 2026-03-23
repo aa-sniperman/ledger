@@ -3,25 +3,19 @@ package kafkabus
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/sniperman/ledger/internal/command"
-	"github.com/sniperman/ledger/internal/sharding"
 )
 
 type AcceptedCommandMessage struct {
-	CommandID   string           `json:"command_id"`
-	ShardID     sharding.ShardID `json:"shard_id"`
-	CommandType command.Type     `json:"command_type"`
+	Envelope    command.Envelope `json:"envelope"`
 	PublishedAt time.Time        `json:"published_at"`
 }
 
 func MessageFromEnvelope(envelope command.Envelope, publishedAt time.Time) (AcceptedCommandMessage, error) {
 	message := AcceptedCommandMessage{
-		CommandID:   envelope.CommandID,
-		ShardID:     envelope.ShardID,
-		CommandType: envelope.Type,
+		Envelope:    envelope,
 		PublishedAt: publishedAt,
 	}
 	if err := message.Validate(); err != nil {
@@ -31,13 +25,7 @@ func MessageFromEnvelope(envelope command.Envelope, publishedAt time.Time) (Acce
 }
 
 func (m AcceptedCommandMessage) Validate() error {
-	if strings.TrimSpace(m.CommandID) == "" {
-		return fmt.Errorf("command id is required")
-	}
-	if err := m.ShardID.Validate(); err != nil {
-		return err
-	}
-	if err := m.CommandType.Validate(); err != nil {
+	if err := m.Envelope.Validate(); err != nil {
 		return err
 	}
 	if m.PublishedAt.IsZero() {

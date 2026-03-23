@@ -51,7 +51,7 @@ func TestPublisherUsesTransactionScopedKafkaKeyForCreate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode published message: %v", err)
 	}
-	if message.CommandID != "cmd_123" || message.ShardID != "shard-a" {
+	if message.Envelope.CommandID != "cmd_123" || message.Envelope.ShardID != "shard-a" {
 		t.Fatalf("unexpected accepted command message: %+v", message)
 	}
 }
@@ -102,9 +102,16 @@ func TestConsumerProcessesAndCommitsMessage(t *testing.T) {
 	t.Parallel()
 
 	payload, err := EncodeMessage(AcceptedCommandMessage{
-		CommandID:   "cmd_123",
-		ShardID:     "shard-a",
-		CommandType: command.TypeWithdrawalCreate,
+		Envelope: command.Envelope{
+			CommandID:      "cmd_123",
+			IdempotencyKey: "idem_123",
+			ShardID:        "shard-a",
+			Type:           command.TypeWithdrawalCreate,
+			Payload:        json.RawMessage(`{"user_id":"user_123","input":{"TransactionID":"tx_123"}}`),
+			Status:         command.StatusAccepted,
+			CreatedAt:      time.Date(2026, 3, 23, 14, 0, 0, 0, time.UTC),
+			UpdatedAt:      time.Date(2026, 3, 23, 14, 0, 0, 0, time.UTC),
+		},
 		PublishedAt: time.Date(2026, 3, 23, 15, 0, 0, 0, time.UTC),
 	})
 	if err != nil {
@@ -204,9 +211,9 @@ type fakeProcessor struct {
 	err       error
 }
 
-func (p *fakeProcessor) ProcessByID(_ context.Context, commandID string, shardID sharding.ShardID, _ time.Time) (command.Envelope, bool, error) {
-	p.commandID = commandID
-	p.shardID = shardID
+func (p *fakeProcessor) ProcessEnvelope(_ context.Context, envelope command.Envelope, _ time.Time) (command.Envelope, bool, error) {
+	p.commandID = envelope.CommandID
+	p.shardID = envelope.ShardID
 	return p.envelope, p.ok, p.err
 }
 
@@ -226,7 +233,9 @@ func newRecordingProcessor() *recordingProcessor {
 	}
 }
 
-func (p *recordingProcessor) ProcessByID(ctx context.Context, commandID string, shardID sharding.ShardID, _ time.Time) (command.Envelope, bool, error) {
+func (p *recordingProcessor) ProcessEnvelope(ctx context.Context, envelope command.Envelope, _ time.Time) (command.Envelope, bool, error) {
+	commandID := envelope.CommandID
+	shardID := envelope.ShardID
 	p.mu.Lock()
 	p.order = append(p.order, commandID)
 	p.concurrency++
@@ -306,9 +315,16 @@ func TestConsumerReturnsProcessorError(t *testing.T) {
 	t.Parallel()
 
 	payload, err := EncodeMessage(AcceptedCommandMessage{
-		CommandID:   "cmd_123",
-		ShardID:     "shard-a",
-		CommandType: command.TypeWithdrawalCreate,
+		Envelope: command.Envelope{
+			CommandID:      "cmd_123",
+			IdempotencyKey: "idem_123",
+			ShardID:        "shard-a",
+			Type:           command.TypeWithdrawalCreate,
+			Payload:        json.RawMessage(`{"user_id":"user_123","input":{"TransactionID":"tx_123"}}`),
+			Status:         command.StatusAccepted,
+			CreatedAt:      time.Date(2026, 3, 23, 14, 0, 0, 0, time.UTC),
+			UpdatedAt:      time.Date(2026, 3, 23, 14, 0, 0, 0, time.UTC),
+		},
 		PublishedAt: time.Date(2026, 3, 23, 15, 0, 0, 0, time.UTC),
 	})
 	if err != nil {
@@ -331,18 +347,32 @@ func TestConsumerProcessesPartitionsInParallel(t *testing.T) {
 	t.Parallel()
 
 	payloadA, err := EncodeMessage(AcceptedCommandMessage{
-		CommandID:   "cmd_a",
-		ShardID:     "shard-a",
-		CommandType: command.TypeWithdrawalCreate,
+		Envelope: command.Envelope{
+			CommandID:      "cmd_a",
+			IdempotencyKey: "idem_a",
+			ShardID:        "shard-a",
+			Type:           command.TypeWithdrawalCreate,
+			Payload:        json.RawMessage(`{"user_id":"user_a","input":{"TransactionID":"tx_a"}}`),
+			Status:         command.StatusAccepted,
+			CreatedAt:      time.Date(2026, 3, 23, 15, 59, 0, 0, time.UTC),
+			UpdatedAt:      time.Date(2026, 3, 23, 15, 59, 0, 0, time.UTC),
+		},
 		PublishedAt: time.Date(2026, 3, 23, 16, 0, 0, 0, time.UTC),
 	})
 	if err != nil {
 		t.Fatalf("encode message A: %v", err)
 	}
 	payloadB, err := EncodeMessage(AcceptedCommandMessage{
-		CommandID:   "cmd_b",
-		ShardID:     "shard-b",
-		CommandType: command.TypeWithdrawalCreate,
+		Envelope: command.Envelope{
+			CommandID:      "cmd_b",
+			IdempotencyKey: "idem_b",
+			ShardID:        "shard-b",
+			Type:           command.TypeWithdrawalCreate,
+			Payload:        json.RawMessage(`{"user_id":"user_b","input":{"TransactionID":"tx_b"}}`),
+			Status:         command.StatusAccepted,
+			CreatedAt:      time.Date(2026, 3, 23, 15, 59, 1, 0, time.UTC),
+			UpdatedAt:      time.Date(2026, 3, 23, 15, 59, 1, 0, time.UTC),
+		},
 		PublishedAt: time.Date(2026, 3, 23, 16, 0, 1, 0, time.UTC),
 	})
 	if err != nil {
@@ -402,18 +432,32 @@ func TestConsumerPreservesSequentialOrderWithinPartition(t *testing.T) {
 	t.Parallel()
 
 	payloadA, err := EncodeMessage(AcceptedCommandMessage{
-		CommandID:   "cmd_a",
-		ShardID:     "shard-a",
-		CommandType: command.TypeWithdrawalCreate,
+		Envelope: command.Envelope{
+			CommandID:      "cmd_a",
+			IdempotencyKey: "idem_a",
+			ShardID:        "shard-a",
+			Type:           command.TypeWithdrawalCreate,
+			Payload:        json.RawMessage(`{"user_id":"user_a","input":{"TransactionID":"tx_a"}}`),
+			Status:         command.StatusAccepted,
+			CreatedAt:      time.Date(2026, 3, 23, 16, 4, 0, 0, time.UTC),
+			UpdatedAt:      time.Date(2026, 3, 23, 16, 4, 0, 0, time.UTC),
+		},
 		PublishedAt: time.Date(2026, 3, 23, 16, 5, 0, 0, time.UTC),
 	})
 	if err != nil {
 		t.Fatalf("encode message A: %v", err)
 	}
 	payloadB, err := EncodeMessage(AcceptedCommandMessage{
-		CommandID:   "cmd_b",
-		ShardID:     "shard-a",
-		CommandType: command.TypeWithdrawalCreate,
+		Envelope: command.Envelope{
+			CommandID:      "cmd_b",
+			IdempotencyKey: "idem_b",
+			ShardID:        "shard-a",
+			Type:           command.TypeWithdrawalCreate,
+			Payload:        json.RawMessage(`{"user_id":"user_b","input":{"TransactionID":"tx_b"}}`),
+			Status:         command.StatusAccepted,
+			CreatedAt:      time.Date(2026, 3, 23, 16, 4, 1, 0, time.UTC),
+			UpdatedAt:      time.Date(2026, 3, 23, 16, 4, 1, 0, time.UTC),
+		},
 		PublishedAt: time.Date(2026, 3, 23, 16, 5, 1, 0, time.UTC),
 	})
 	if err != nil {

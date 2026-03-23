@@ -142,7 +142,7 @@ Status as of 2026-03-23:
 - Milestone 2: complete in code and unit tests
 - Milestone 3: complete in code and unit tests
 - Milestone 4: complete in code and integration tests
-- Milestone 5: not started
+- Milestone 5: complete in code and unit/integration tests
 - Milestone 6: not started
 
 ### Milestone 1: Parallel Kafka Worker Execution
@@ -295,6 +295,13 @@ Expected outcome:
 
 - queueing scales with Kafka, not with one central table
 - command status remains observable without dominating request latency
+
+Implemented:
+
+- Kafka messages now carry the full accepted command envelope, not only `command_id`
+- the Kafka worker executes directly from the Kafka message payload instead of reloading command payload from Postgres
+- `ledger_commands` remains only the durable accepted-command log for API-side idempotency and later audit
+- worker execution no longer depends on command-row reads for the Kafka path
 
 ### Milestone 6: Measured Load Validation
 

@@ -12,11 +12,10 @@ import (
 	"github.com/segmentio/kafka-go"
 
 	"github.com/sniperman/ledger/internal/command"
-	"github.com/sniperman/ledger/internal/sharding"
 )
 
 type CommandProcessor interface {
-	ProcessByID(ctx context.Context, commandID string, shardID sharding.ShardID, now time.Time) (command.Envelope, bool, error)
+	ProcessEnvelope(ctx context.Context, envelope command.Envelope, now time.Time) (command.Envelope, bool, error)
 }
 
 type kafkaMessageReader interface {
@@ -181,23 +180,23 @@ func (c *Consumer) runPartitionWorker(ctx context.Context, partition int, messag
 				return
 			}
 
-			envelope, processed, err := c.processor.ProcessByID(ctx, partitionMessage.accepted.CommandID, partitionMessage.accepted.ShardID, c.now())
+			envelope, processed, err := c.processor.ProcessEnvelope(ctx, partitionMessage.accepted.Envelope, c.now())
 			if err != nil {
-				reportErr(fmt.Errorf("process kafka command %s on partition %d: %w", partitionMessage.accepted.CommandID, partition, err))
+				reportErr(fmt.Errorf("process kafka command %s on partition %d: %w", partitionMessage.accepted.Envelope.CommandID, partition, err))
 				return
 			}
 
 			if commitErr := c.reader.CommitMessages(ctx, partitionMessage.message); commitErr != nil {
-				reportErr(fmt.Errorf("commit kafka message %s on partition %d: %w", partitionMessage.accepted.CommandID, partition, commitErr))
+				reportErr(fmt.Errorf("commit kafka message %s on partition %d: %w", partitionMessage.accepted.Envelope.CommandID, partition, commitErr))
 				return
 			}
 
 			if processed {
-				c.logger.Info("processed kafka command", "partition", partition, "shard_id", partitionMessage.accepted.ShardID, "command_id", envelope.CommandID, "type", envelope.Type, "status", envelope.Status)
+				c.logger.Info("processed kafka command", "partition", partition, "shard_id", partitionMessage.accepted.Envelope.ShardID, "command_id", envelope.CommandID, "type", envelope.Type, "status", envelope.Status)
 				continue
 			}
 
-			c.logger.Info("skipped kafka command", "partition", partition, "shard_id", partitionMessage.accepted.ShardID, "command_id", partitionMessage.accepted.CommandID)
+			c.logger.Info("skipped kafka command", "partition", partition, "shard_id", partitionMessage.accepted.Envelope.ShardID, "command_id", partitionMessage.accepted.Envelope.CommandID)
 		}
 	}
 }

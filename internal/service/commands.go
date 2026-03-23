@@ -232,6 +232,19 @@ func (s *CommandService) ProcessByID(ctx context.Context, commandID string, shar
 	return envelope, true, nil
 }
 
+func (s *CommandService) ProcessEnvelope(ctx context.Context, envelope command.Envelope, now time.Time) (command.Envelope, bool, error) {
+	if err := envelope.Validate(); err != nil {
+		return command.Envelope{}, false, err
+	}
+	if _, err := s.executeCommand(ctx, envelope); err != nil {
+		return command.Envelope{}, false, err
+	}
+
+	envelope.Status = command.StatusSucceeded
+	envelope.UpdatedAt = now.UTC()
+	return envelope, true, nil
+}
+
 func (s *CommandService) enqueueTransition(ctx context.Context, commandType command.Type, input EnqueueTransitionCommandInput) (command.Envelope, bool, error) {
 	if strings.TrimSpace(input.UserID) == "" {
 		return command.Envelope{}, false, fmt.Errorf("user id is required")
