@@ -25,7 +25,7 @@ func TestCommandServiceEnqueueTransactionCreateIntegration(t *testing.T) {
 	}
 
 	commandService := NewCommandService(db, router, nil)
-	systemAccountID, shardID, err := router.SystemAccountForUser("user_123", sharding.SystemAccountRolePayoutHold)
+	systemAccountID, shardID, err := router.SystemAccountForUser("user_123", "USD", sharding.SystemAccountRolePayoutHold)
 	if err != nil {
 		t.Fatalf("pick system account: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestCommandServiceEnqueueTransactionCreateIntegration(t *testing.T) {
 			EffectiveAt:   time.Date(2026, 3, 22, 8, 0, 0, 0, time.UTC),
 			CreatedAt:     time.Date(2026, 3, 22, 8, 0, 1, 0, time.UTC),
 			Entries: []CreateEntryInput{
-				{EntryID: "entry_cmd_create_1_debit", AccountID: sharding.UserAccountID("user_123"), Amount: 70, Currency: "USD", Direction: "debit"},
+				{EntryID: "entry_cmd_create_1_debit", AccountID: sharding.UserAccountID("user_123", "USD"), Amount: 70, Currency: "USD", Direction: "debit"},
 				{EntryID: "entry_cmd_create_1_credit", AccountID: systemAccountID, Amount: 70, Currency: "USD", Direction: "credit"},
 			},
 		},
@@ -67,7 +67,7 @@ func TestCommandServiceEnqueueTransactionCreateIntegration(t *testing.T) {
 			EffectiveAt:   time.Date(2026, 3, 22, 8, 0, 0, 0, time.UTC),
 			CreatedAt:     time.Date(2026, 3, 22, 8, 0, 1, 0, time.UTC),
 			Entries: []CreateEntryInput{
-				{EntryID: "entry_cmd_create_1_debit", AccountID: sharding.UserAccountID("user_123"), Amount: 70, Currency: "USD", Direction: "debit"},
+				{EntryID: "entry_cmd_create_1_debit", AccountID: sharding.UserAccountID("user_123", "USD"), Amount: 70, Currency: "USD", Direction: "debit"},
 				{EntryID: "entry_cmd_create_1_credit", AccountID: systemAccountID, Amount: 70, Currency: "USD", Direction: "credit"},
 			},
 		},
@@ -90,7 +90,7 @@ func TestCommandServiceClaimNextIntegration(t *testing.T) {
 	}
 
 	commandService := NewCommandService(db, router, nil)
-	systemAccountID, shardID, err := router.SystemAccountForUser("user_123", sharding.SystemAccountRolePayoutHold)
+	systemAccountID, shardID, err := router.SystemAccountForUser("user_123", "USD", sharding.SystemAccountRolePayoutHold)
 	if err != nil {
 		t.Fatalf("pick system account: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestCommandServiceClaimNextIntegration(t *testing.T) {
 			EffectiveAt:   time.Date(2026, 3, 22, 8, 0, 0, 0, time.UTC),
 			CreatedAt:     time.Date(2026, 3, 22, 8, 0, 1, 0, time.UTC),
 			Entries: []CreateEntryInput{
-				{EntryID: "entry_cmd_claim_1_debit", AccountID: sharding.UserAccountID("user_123"), Amount: 70, Currency: "USD", Direction: "debit"},
+				{EntryID: "entry_cmd_claim_1_debit", AccountID: sharding.UserAccountID("user_123", "USD"), Amount: 70, Currency: "USD", Direction: "debit"},
 				{EntryID: "entry_cmd_claim_1_credit", AccountID: systemAccountID, Amount: 70, Currency: "USD", Direction: "credit"},
 			},
 		},
@@ -145,7 +145,7 @@ func TestCommandServiceProcessNextCreatesTransactionIntegration(t *testing.T) {
 	}
 
 	commandService := NewCommandService(db, router, nil)
-	systemAccountID, shardID, err := router.SystemAccountForUser("user_123", sharding.SystemAccountRolePayoutHold)
+	systemAccountID, shardID, err := router.SystemAccountForUser("user_123", "USD", sharding.SystemAccountRolePayoutHold)
 	if err != nil {
 		t.Fatalf("pick system account: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestCommandServiceProcessNextCreatesTransactionIntegration(t *testing.T) {
 			EffectiveAt:   time.Date(2026, 3, 22, 8, 0, 0, 0, time.UTC),
 			CreatedAt:     time.Date(2026, 3, 22, 8, 0, 1, 0, time.UTC),
 			Entries: []CreateEntryInput{
-				{EntryID: "entry_cmd_process_1_debit", AccountID: sharding.UserAccountID("user_123"), Amount: 70, Currency: "USD", Direction: "debit"},
+				{EntryID: "entry_cmd_process_1_debit", AccountID: sharding.UserAccountID("user_123", "USD"), Amount: 70, Currency: "USD", Direction: "debit"},
 				{EntryID: "entry_cmd_process_1_credit", AccountID: systemAccountID, Amount: 70, Currency: "USD", Direction: "credit"},
 			},
 		},
@@ -202,17 +202,17 @@ func TestCommandServiceProcessNextMarksTerminalFailureIntegration(t *testing.T) 
 	}
 
 	commandService := NewCommandService(db, router, nil)
-	systemAccountID, shardID, err := router.SystemAccountForUser("user_123", sharding.SystemAccountRolePayoutHold)
+	systemAccountID, shardID, err := router.SystemAccountForUser("user_123", "USD", sharding.SystemAccountRolePayoutHold)
 	if err != nil {
 		t.Fatalf("pick system account: %v", err)
 	}
 
 	// Only seed the system account so the create execution fails with missing user account.
 	seedCommandExecutionAccounts(t, db, systemAccountID)
-	if _, err := db.ExecContext(context.Background(), `DELETE FROM ledger.account_current_balances WHERE account_id = $1`, sharding.UserAccountID("user_123")); err != nil {
+	if _, err := db.ExecContext(context.Background(), `DELETE FROM ledger.account_current_balances WHERE account_id = $1`, sharding.UserAccountID("user_123", "USD")); err != nil {
 		t.Fatalf("delete user balance row: %v", err)
 	}
-	if _, err := db.ExecContext(context.Background(), `DELETE FROM ledger.accounts WHERE account_id = $1`, sharding.UserAccountID("user_123")); err != nil {
+	if _, err := db.ExecContext(context.Background(), `DELETE FROM ledger.accounts WHERE account_id = $1`, sharding.UserAccountID("user_123", "USD")); err != nil {
 		t.Fatalf("delete user account row: %v", err)
 	}
 
@@ -227,7 +227,7 @@ func TestCommandServiceProcessNextMarksTerminalFailureIntegration(t *testing.T) 
 			EffectiveAt:   time.Date(2026, 3, 22, 8, 0, 0, 0, time.UTC),
 			CreatedAt:     time.Date(2026, 3, 22, 8, 0, 1, 0, time.UTC),
 			Entries: []CreateEntryInput{
-				{EntryID: "entry_cmd_process_fail_1_debit", AccountID: sharding.UserAccountID("user_123"), Amount: 70, Currency: "USD", Direction: "debit"},
+				{EntryID: "entry_cmd_process_fail_1_debit", AccountID: sharding.UserAccountID("user_123", "USD"), Amount: 70, Currency: "USD", Direction: "debit"},
 				{EntryID: "entry_cmd_process_fail_1_credit", AccountID: systemAccountID, Amount: 70, Currency: "USD", Direction: "credit"},
 			},
 		},
@@ -259,7 +259,7 @@ func TestCommandServiceProcessNextPostsTransactionIntegration(t *testing.T) {
 
 	commandService := NewCommandService(db, router, nil)
 	transactionService := NewTransactionService(db)
-	systemAccountID, shardID, err := router.SystemAccountForUser("user_123", sharding.SystemAccountRolePayoutHold)
+	systemAccountID, shardID, err := router.SystemAccountForUser("user_123", "USD", sharding.SystemAccountRolePayoutHold)
 	if err != nil {
 		t.Fatalf("pick system account: %v", err)
 	}
@@ -274,7 +274,7 @@ func TestCommandServiceProcessNextPostsTransactionIntegration(t *testing.T) {
 		EffectiveAt:   time.Date(2026, 3, 22, 8, 0, 0, 0, time.UTC),
 		CreatedAt:     time.Date(2026, 3, 22, 8, 0, 1, 0, time.UTC),
 		Entries: []CreateEntryInput{
-			{EntryID: "entry_cmd_post_1_debit", AccountID: sharding.UserAccountID("user_123"), Amount: 70, Currency: "USD", Direction: "debit"},
+			{EntryID: "entry_cmd_post_1_debit", AccountID: sharding.UserAccountID("user_123", "USD"), Amount: 70, Currency: "USD", Direction: "debit"},
 			{EntryID: "entry_cmd_post_1_credit", AccountID: systemAccountID, Amount: 70, Currency: "USD", Direction: "credit"},
 		},
 	}); err != nil {
@@ -320,7 +320,7 @@ func seedCommandExecutionAccounts(t *testing.T, db *sql.DB, systemAccountID stri
 	accounts := []domain.AccountState{
 		{
 			Account: domain.Account{
-				ID:            sharding.UserAccountID("user_123"),
+				ID:            sharding.UserAccountID("user_123", "USD"),
 				Currency:      "USD",
 				NormalBalance: domain.NormalBalanceCredit,
 				CreatedAt:     now,

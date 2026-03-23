@@ -80,17 +80,17 @@ Each shard contains:
 
 Recommended account strategy:
 
-- `user_wallet:{user_id}` lives in exactly one shard
-- `system_settlement:{shard_id}`
-- `payout_holding:{shard_id}`
-- `cash_in_clearing:{shard_id}`
-- `partner_x:{shard_id}`
+- `user_wallet:{user_id}:{currency}` lives in exactly one shard and lets one user hold multiple currencies
+- `system_settlement:{shard_id}:{currency}`
+- `payout_holding:{shard_id}:{currency}`
+- `cash_in_clearing:{shard_id}:{currency}`
+- `partner_x:{shard_id}:{currency}`
 
 Routing rule:
 
 - first route the end user to a shard with consistent hashing on `user_id`
 - then choose system and partner accounts only from that same shard
-- if a system role needs more write spread, use a shard-local pool such as `payout_holding:{shard_id}:{slot}` where `slot` is chosen deterministically from the routed user id
+- if a system role needs more write spread, use a shard-local pool such as `payout_holding:{shard_id}:{currency}:{slot}` where `slot` is chosen deterministically from the routed user id
 
 This avoids one global hot system account and keeps writes local.
 

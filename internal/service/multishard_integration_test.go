@@ -37,11 +37,11 @@ func TestCommandServiceProcessNextUsesShardSpecificDBIntegration(t *testing.T) {
 	userShardA := testUserIDForShard(t, router, "shard-a")
 	userShardB := testUserIDForShard(t, router, "shard-b")
 
-	systemAccountShardA, shardA, err := router.SystemAccountForUser(userShardA, sharding.SystemAccountRolePayoutHold)
+	systemAccountShardA, shardA, err := router.SystemAccountForUser(userShardA, "USD", sharding.SystemAccountRolePayoutHold)
 	if err != nil {
 		t.Fatalf("pick shard-a system account: %v", err)
 	}
-	systemAccountShardB, shardB, err := router.SystemAccountForUser(userShardB, sharding.SystemAccountRolePayoutHold)
+	systemAccountShardB, shardB, err := router.SystemAccountForUser(userShardB, "USD", sharding.SystemAccountRolePayoutHold)
 	if err != nil {
 		t.Fatalf("pick shard-b system account: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestCommandServiceProcessNextUsesShardSpecificDBIntegration(t *testing.T) {
 			EffectiveAt:   time.Date(2026, 3, 23, 8, 0, 0, 0, time.UTC),
 			CreatedAt:     time.Date(2026, 3, 23, 8, 0, 1, 0, time.UTC),
 			Entries: []CreateEntryInput{
-				{EntryID: "entry_cmd_multishard_a_debit", AccountID: sharding.UserAccountID(userShardA), Amount: 70, Currency: "USD", Direction: "debit"},
+				{EntryID: "entry_cmd_multishard_a_debit", AccountID: sharding.UserAccountID(userShardA, "USD"), Amount: 70, Currency: "USD", Direction: "debit"},
 				{EntryID: "entry_cmd_multishard_a_credit", AccountID: systemAccountShardA, Amount: 70, Currency: "USD", Direction: "credit"},
 			},
 		},
@@ -80,7 +80,7 @@ func TestCommandServiceProcessNextUsesShardSpecificDBIntegration(t *testing.T) {
 			EffectiveAt:   time.Date(2026, 3, 23, 8, 1, 0, 0, time.UTC),
 			CreatedAt:     time.Date(2026, 3, 23, 8, 1, 1, 0, time.UTC),
 			Entries: []CreateEntryInput{
-				{EntryID: "entry_cmd_multishard_b_debit", AccountID: sharding.UserAccountID(userShardB), Amount: 40, Currency: "USD", Direction: "debit"},
+				{EntryID: "entry_cmd_multishard_b_debit", AccountID: sharding.UserAccountID(userShardB, "USD"), Amount: 40, Currency: "USD", Direction: "debit"},
 				{EntryID: "entry_cmd_multishard_b_credit", AccountID: systemAccountShardB, Amount: 40, Currency: "USD", Direction: "credit"},
 			},
 		},
@@ -125,7 +125,7 @@ func TestCommandServiceProcessNextUsesShardSpecificDBIntegration(t *testing.T) {
 	assertTransactionExistsOnShard(t, shardDBs[shardB], "tx_cmd_multishard_b", domain.TransactionStatusPending)
 	assertTransactionMissingOnShard(t, shardDBs[shardA], "tx_cmd_multishard_b")
 
-	balanceShardA, err := queryService.GetAccountBalance(context.Background(), sharding.UserAccountID(userShardA))
+	balanceShardA, err := queryService.GetAccountBalance(context.Background(), sharding.UserAccountID(userShardA, "USD"))
 	if err != nil {
 		t.Fatalf("load shard-a account balance: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestCommandServiceProcessNextUsesShardSpecificDBIntegration(t *testing.T) {
 		t.Fatalf("unexpected shard-a user balance: %+v", balanceShardA)
 	}
 
-	balanceShardB, err := queryService.GetAccountBalance(context.Background(), sharding.UserAccountID(userShardB))
+	balanceShardB, err := queryService.GetAccountBalance(context.Background(), sharding.UserAccountID(userShardB, "USD"))
 	if err != nil {
 		t.Fatalf("load shard-b account balance: %v", err)
 	}
@@ -186,7 +186,7 @@ func seedShardCommandExecutionAccounts(t *testing.T, db store.DBTX, userID, syst
 	accounts := []domain.AccountState{
 		{
 			Account: domain.Account{
-				ID:            sharding.UserAccountID(userID),
+				ID:            sharding.UserAccountID(userID, "USD"),
 				Currency:      "USD",
 				NormalBalance: domain.NormalBalanceCredit,
 				CreatedAt:     now,

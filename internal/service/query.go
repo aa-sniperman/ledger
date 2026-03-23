@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 
 	"github.com/sniperman/ledger/internal/command"
 	"github.com/sniperman/ledger/internal/domain"
@@ -35,7 +36,7 @@ func (s *QueryService) GetAccountBalance(ctx context.Context, accountID string) 
 		if _, db, ok := s.registry.SingleShard(); ok {
 			return NewAccountService(db).GetBalance(ctx, accountID)
 		}
-		return AccountBalanceView{}, err
+		return AccountBalanceView{}, fmt.Errorf("%w: %v", domain.ErrInvalidAccount, err)
 	}
 
 	db, err := s.registry.DBForShard(shardID)
@@ -44,6 +45,10 @@ func (s *QueryService) GetAccountBalance(ctx context.Context, accountID string) 
 	}
 
 	return NewAccountService(db).GetBalance(ctx, accountID)
+}
+
+func (s *QueryService) GetUserBalance(ctx context.Context, userID, currency string) (AccountBalanceView, error) {
+	return s.GetAccountBalance(ctx, sharding.UserAccountID(userID, currency))
 }
 
 func (s *QueryService) GetTransaction(ctx context.Context, transactionID string) (domain.Transaction, error) {

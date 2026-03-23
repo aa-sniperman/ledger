@@ -49,11 +49,11 @@ func TestFleetProcessAvailableAllIntegration(t *testing.T) {
 	userShardA := testUserIDForShard(t, router, "shard-a")
 	userShardB := testUserIDForShard(t, router, "shard-b")
 
-	systemAccountShardA, shardA, err := router.SystemAccountForUser(userShardA, sharding.SystemAccountRolePayoutHold)
+	systemAccountShardA, shardA, err := router.SystemAccountForUser(userShardA, "USD", sharding.SystemAccountRolePayoutHold)
 	if err != nil {
 		t.Fatalf("pick shard-a system account: %v", err)
 	}
-	systemAccountShardB, shardB, err := router.SystemAccountForUser(userShardB, sharding.SystemAccountRolePayoutHold)
+	systemAccountShardB, shardB, err := router.SystemAccountForUser(userShardB, "USD", sharding.SystemAccountRolePayoutHold)
 	if err != nil {
 		t.Fatalf("pick shard-b system account: %v", err)
 	}
@@ -105,7 +105,7 @@ func seedShardAccounts(t *testing.T, db store.DBTX, userID, systemAccountID stri
 
 	accounts := []serviceAccountState{
 		{
-			AccountID:      sharding.UserAccountID(userID),
+			AccountID:      sharding.UserAccountID(userID, "USD"),
 			Version:        10,
 			PostedCredits:  100,
 			PendingCredits: 100,
@@ -139,7 +139,7 @@ func enqueueCreateCommand(t *testing.T, commandService *service.CommandService, 
 			EffectiveAt:   time.Date(2026, 3, 23, 12, 30, 0, 0, time.UTC),
 			CreatedAt:     time.Date(2026, 3, 23, 12, 30, 1, 0, time.UTC),
 			Entries: []service.CreateEntryInput{
-				{EntryID: transactionID + "_debit", AccountID: sharding.UserAccountID(userID), Amount: amount, Currency: "USD", Direction: "debit"},
+				{EntryID: transactionID + "_debit", AccountID: sharding.UserAccountID(userID, "USD"), Amount: amount, Currency: "USD", Direction: "debit"},
 				{EntryID: transactionID + "_credit", AccountID: systemAccountID, Amount: amount, Currency: "USD", Direction: "credit"},
 			},
 		},

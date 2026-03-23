@@ -69,7 +69,7 @@ func TestSystemAccountForUserStaysInUserShard(t *testing.T) {
 		t.Fatalf("build router: %v", err)
 	}
 
-	accountID, shardID, err := router.SystemAccountForUser("user_123", SystemAccountRolePayoutHold)
+	accountID, shardID, err := router.SystemAccountForUser("user_123", "USD", SystemAccountRolePayoutHold)
 	if err != nil {
 		t.Fatalf("route system account: %v", err)
 	}
@@ -94,12 +94,12 @@ func TestSystemAccountForUserUsesDeterministicPoolSlot(t *testing.T) {
 		t.Fatalf("build router: %v", err)
 	}
 
-	first, _, err := router.SystemAccountForUser("user_123", SystemAccountRolePayoutHold)
+	first, _, err := router.SystemAccountForUser("user_123", "USD", SystemAccountRolePayoutHold)
 	if err != nil {
 		t.Fatalf("first account selection: %v", err)
 	}
 
-	second, _, err := router.SystemAccountForUser("user_123", SystemAccountRolePayoutHold)
+	second, _, err := router.SystemAccountForUser("user_123", "USD", SystemAccountRolePayoutHold)
 	if err != nil {
 		t.Fatalf("second account selection: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestShardForAccountRoutesUserWalletByUserID(t *testing.T) {
 		t.Fatalf("route user: %v", err)
 	}
 
-	actual, err := router.ShardForAccount(UserAccountID("user_123"))
+	actual, err := router.ShardForAccount(UserAccountID("user_123", "USD"))
 	if err != nil {
 		t.Fatalf("route user account: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestSystemAccountPoolSpreadsUsersAcrossShardLocalSlots(t *testing.T) {
 			continue
 		}
 
-		accountID, systemShardID, err := router.SystemAccountForUser(userID, SystemAccountRolePayoutHold)
+		accountID, systemShardID, err := router.SystemAccountForUser(userID, "USD", SystemAccountRolePayoutHold)
 		if err != nil {
 			t.Fatalf("pick system account for %s: %v", userID, err)
 		}
@@ -179,11 +179,11 @@ func TestSystemAccountPoolSpreadsUsersAcrossShardLocalSlots(t *testing.T) {
 		}
 
 		parts := strings.Split(accountID, ":")
-		if len(parts) != 3 {
+		if len(parts) != 4 {
 			t.Fatalf("expected pooled system account id, got %q", accountID)
 		}
 
-		slotCounts[parts[2]]++
+		slotCounts[parts[3]]++
 		seenUsers++
 	}
 
@@ -195,5 +195,30 @@ func TestSystemAccountPoolSpreadsUsersAcrossShardLocalSlots(t *testing.T) {
 		if count == 0 {
 			t.Fatalf("expected slot %s to receive routed users, got counts %+v", slot, slotCounts)
 		}
+	}
+}
+
+func TestShardForAccountRoutesCurrencyScopedSystemAccount(t *testing.T) {
+	t.Parallel()
+
+	router, err := NewRouter([]ShardID{"shard-a", "shard-b"}, map[SystemAccountRole]int{
+		SystemAccountRolePayoutHold: 4,
+	})
+	if err != nil {
+		t.Fatalf("build router: %v", err)
+	}
+
+	accountID, shardID, err := router.SystemAccountForUser("user_123", "USD", SystemAccountRolePayoutHold)
+	if err != nil {
+		t.Fatalf("pick system account: %v", err)
+	}
+
+	actual, err := router.ShardForAccount(accountID)
+	if err != nil {
+		t.Fatalf("route account: %v", err)
+	}
+
+	if actual != shardID {
+		t.Fatalf("expected account shard %q, got %q", shardID, actual)
 	}
 }

@@ -59,6 +59,7 @@ func openAPISpec() map[string]any {
 			{"name": "System", "description": "Operational and documentation endpoints"},
 			{"name": "Payments", "description": "Payment-oriented async write commands"},
 			{"name": "Commands", "description": "Async command status endpoints"},
+			{"name": "Users", "description": "User-oriented balance queries"},
 			{"name": "Accounts", "description": "Account balance queries"},
 			{"name": "Transactions", "description": "Ledger transaction queries"},
 		},
@@ -128,6 +129,20 @@ func openAPISpec() map[string]any {
 					"responses": map[string]any{
 						"200": jsonResponseRef("CommandResponse", "Command status"),
 						"404": jsonResponseRef("ErrorResponse", "Command not found"),
+					},
+				},
+			},
+			"/users/{id}/balances/{currency}": map[string]any{
+				"get": map[string]any{
+					"summary": "Get current user wallet balance for a currency",
+					"tags":    []string{"Users"},
+					"parameters": []map[string]any{
+						pathParameter("id", "User ID"),
+						pathParameter("currency", "Currency code"),
+					},
+					"responses": map[string]any{
+						"200": jsonResponseRef("AccountBalanceResponse", "Current user wallet balance for the requested currency"),
+						"404": jsonResponseRef("ErrorResponse", "User wallet not found"),
 					},
 				},
 			},

@@ -44,6 +44,34 @@ func (s *Server) handleGetAccountBalances(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, toAccountBalanceResponse(balance))
 }
 
+func (s *Server) handleGetUserBalance(w http.ResponseWriter, r *http.Request) {
+	userID := r.PathValue("id")
+	if userID == "" {
+		writeError(w, http.StatusBadRequest, "user id is required")
+		return
+	}
+	currency := r.PathValue("currency")
+	if currency == "" {
+		writeError(w, http.StatusBadRequest, "currency is required")
+		return
+	}
+
+	balance, err := s.queryService.GetUserBalance(r.Context(), userID, currency)
+	if err != nil {
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			writeError(w, http.StatusNotFound, err.Error())
+		case isClientError(err):
+			writeError(w, http.StatusBadRequest, err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, "internal server error")
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusOK, toAccountBalanceResponse(balance))
+}
+
 func (s *Server) handleGetCommand(w http.ResponseWriter, r *http.Request) {
 	commandID := r.PathValue("id")
 	if commandID == "" {

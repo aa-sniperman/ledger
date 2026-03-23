@@ -96,7 +96,11 @@ func (r Router) ShardForAccount(accountID string) (ShardID, error) {
 	}
 
 	if prefix == UserWalletAccountPrefix {
-		return r.ShardForUser(remainder)
+		parts := strings.Split(remainder, ":")
+		if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+			return "", fmt.Errorf("invalid user account id %q", accountID)
+		}
+		return r.ShardForUser(parts[0])
 	}
 
 	role := SystemAccountRole(prefix)
@@ -105,7 +109,7 @@ func (r Router) ShardForAccount(accountID string) (ShardID, error) {
 	}
 
 	parts := strings.Split(remainder, ":")
-	if len(parts) != 1 && len(parts) != 2 {
+	if len(parts) != 2 && len(parts) != 3 {
 		return "", fmt.Errorf("invalid system account id %q", accountID)
 	}
 
@@ -118,8 +122,12 @@ func (r Router) ShardForAccount(accountID string) (ShardID, error) {
 		return "", fmt.Errorf("unknown shard id %q in account %q", shardID, accountID)
 	}
 
-	if len(parts) == 2 {
-		if _, err := strconv.Atoi(parts[1]); err != nil {
+	if strings.TrimSpace(parts[1]) == "" {
+		return "", fmt.Errorf("invalid system account currency in %q", accountID)
+	}
+
+	if len(parts) == 3 {
+		if _, err := strconv.Atoi(parts[2]); err != nil {
 			return "", fmt.Errorf("invalid system account slot in %q", accountID)
 		}
 	}
@@ -127,17 +135,17 @@ func (r Router) ShardForAccount(accountID string) (ShardID, error) {
 	return shardID, nil
 }
 
-func UserAccountID(userID string) string {
-	return fmt.Sprintf("%s:%s", UserWalletAccountPrefix, userID)
+func UserAccountID(userID, currency string) string {
+	return fmt.Sprintf("%s:%s:%s", UserWalletAccountPrefix, userID, currency)
 }
 
-func (r Router) SystemAccountForUser(userID string, role SystemAccountRole) (string, ShardID, error) {
+func (r Router) SystemAccountForUser(userID, currency string, role SystemAccountRole) (string, ShardID, error) {
 	shardID, err := r.ShardForUser(userID)
 	if err != nil {
 		return "", "", err
 	}
 
-	accountID, err := r.SystemAccountIDForShard(userID, shardID, role)
+	accountID, err := r.SystemAccountIDForShard(userID, shardID, currency, role)
 	if err != nil {
 		return "", "", err
 	}
@@ -145,12 +153,15 @@ func (r Router) SystemAccountForUser(userID string, role SystemAccountRole) (str
 	return accountID, shardID, nil
 }
 
-func (r Router) SystemAccountIDForShard(routingKey string, shardID ShardID, role SystemAccountRole) (string, error) {
+func (r Router) SystemAccountIDForShard(routingKey string, shardID ShardID, currency string, role SystemAccountRole) (string, error) {
 	if err := role.Validate(); err != nil {
 		return "", err
 	}
 	if err := shardID.Validate(); err != nil {
 		return "", err
+	}
+	if strings.TrimSpace(currency) == "" {
+		return "", fmt.Errorf("currency is required")
 	}
 	if !slices.Contains(r.shardIDs, shardID) {
 		return "", fmt.Errorf("unknown shard id %q", shardID)
@@ -158,12 +169,12 @@ func (r Router) SystemAccountIDForShard(routingKey string, shardID ShardID, role
 
 	poolSize := r.poolSizeForRole(role)
 	if poolSize == 1 {
-		return fmt.Sprintf("%s:%s", role, shardID), nil
+		return fmt.Sprintf("%s:%s:%s", role, shardID, currency), nil
 	}
 
-	slotRoutingKey := fmt.Sprintf("%s:%s:%s", routingKey, shardID, role)
+	slotRoutingKey := fmt.Sprintf("%s:%s:%s:%s", routingKey, shardID, currency, role)
 	slot := deterministicSlotIndex(slotRoutingKey, poolSize)
-	return fmt.Sprintf("%s:%s:%d", role, shardID, slot), nil
+	return fmt.Sprintf("%s:%s:%s:%d", role, shardID, currency, slot), nil
 }
 
 func (r Router) poolSizeForRole(role SystemAccountRole) int {

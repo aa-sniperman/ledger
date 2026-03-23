@@ -62,6 +62,7 @@ func NewWithRegistry(cfg config.Config, db *sql.DB, router sharding.Router, regi
 	mux.HandleFunc("GET /healthz", server.handleHealth)
 	mux.HandleFunc("GET /readyz", server.handleReady)
 	mux.HandleFunc("GET /commands/{id}", server.handleGetCommand)
+	mux.HandleFunc("GET /users/{id}/balances/{currency}", server.handleGetUserBalance)
 	mux.HandleFunc("GET /accounts/{id}/balances", server.handleGetAccountBalances)
 	mux.HandleFunc("GET /transactions/{id}", server.handleGetTransaction)
 	mux.HandleFunc("POST /commands/payments.withdrawals.create", server.handleEnqueueWithdrawalCreate)

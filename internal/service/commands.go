@@ -102,7 +102,7 @@ func (s *CommandService) EnqueueWithdrawalCreate(ctx context.Context, input Enqu
 		return command.Envelope{}, false, err
 	}
 
-	systemAccountID, shardID, err := s.router.SystemAccountForUser(input.UserID, sharding.SystemAccountRolePayoutHold)
+	systemAccountID, shardID, err := s.router.SystemAccountForUser(input.UserID, input.Currency, sharding.SystemAccountRolePayoutHold)
 	if err != nil {
 		return command.Envelope{}, false, err
 	}
@@ -115,7 +115,7 @@ func (s *CommandService) EnqueueWithdrawalCreate(ctx context.Context, input Enqu
 		EffectiveAt:   input.EffectiveAt,
 		CreatedAt:     input.CreatedAt,
 		Entries: []CreateEntryInput{
-			{EntryID: paymentEntryID(input.TransactionID, "user_debit"), AccountID: sharding.UserAccountID(input.UserID), Amount: input.Amount, Currency: input.Currency, Direction: domain.DirectionDebit},
+			{EntryID: paymentEntryID(input.TransactionID, "user_debit"), AccountID: sharding.UserAccountID(input.UserID, input.Currency), Amount: input.Amount, Currency: input.Currency, Direction: domain.DirectionDebit},
 			{EntryID: paymentEntryID(input.TransactionID, "system_credit"), AccountID: systemAccountID, Amount: input.Amount, Currency: input.Currency, Direction: domain.DirectionCredit},
 		},
 	}
@@ -139,7 +139,7 @@ func (s *CommandService) EnqueueDepositRecord(ctx context.Context, input Enqueue
 		return command.Envelope{}, false, err
 	}
 
-	systemAccountID, shardID, err := s.router.SystemAccountForUser(input.UserID, sharding.SystemAccountRoleCashIn)
+	systemAccountID, shardID, err := s.router.SystemAccountForUser(input.UserID, input.Currency, sharding.SystemAccountRoleCashIn)
 	if err != nil {
 		return command.Envelope{}, false, err
 	}
@@ -154,7 +154,7 @@ func (s *CommandService) EnqueueDepositRecord(ctx context.Context, input Enqueue
 		CreatedAt:     input.CreatedAt,
 		Entries: []CreateEntryInput{
 			{EntryID: paymentEntryID(input.TransactionID, "system_debit"), AccountID: systemAccountID, Amount: input.Amount, Currency: input.Currency, Direction: domain.DirectionDebit},
-			{EntryID: paymentEntryID(input.TransactionID, "user_credit"), AccountID: sharding.UserAccountID(input.UserID), Amount: input.Amount, Currency: input.Currency, Direction: domain.DirectionCredit},
+			{EntryID: paymentEntryID(input.TransactionID, "user_credit"), AccountID: sharding.UserAccountID(input.UserID, input.Currency), Amount: input.Amount, Currency: input.Currency, Direction: domain.DirectionCredit},
 		},
 	}
 
@@ -394,7 +394,6 @@ func isTerminalCommandError(err error) bool {
 }
 
 func (s *CommandService) validateSingleShardUserTransaction(userID string, shardID sharding.ShardID, transaction domain.Transaction) error {
-	expectedUserAccountID := sharding.UserAccountID(userID)
 	userAccountSeen := false
 
 	for _, entry := range transaction.Entries {
@@ -407,6 +406,7 @@ func (s *CommandService) validateSingleShardUserTransaction(userID string, shard
 		}
 
 		if strings.HasPrefix(entry.AccountID, sharding.UserWalletAccountPrefix+":") {
+			expectedUserAccountID := sharding.UserAccountID(userID, entry.Money.Currency)
 			if entry.AccountID != expectedUserAccountID {
 				return fmt.Errorf("transaction for user %s cannot reference user account %s", userID, entry.AccountID)
 			}
@@ -415,7 +415,7 @@ func (s *CommandService) validateSingleShardUserTransaction(userID string, shard
 	}
 
 	if !userAccountSeen {
-		return fmt.Errorf("transaction for user %s must include account %s", userID, expectedUserAccountID)
+		return fmt.Errorf("transaction for user %s must include a currency-scoped user wallet account", userID)
 	}
 
 	return nil

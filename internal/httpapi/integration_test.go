@@ -55,7 +55,7 @@ func TestWithdrawalCreateAndReadHTTPIntegration(t *testing.T) {
 	processNextSingleShardCommand(t, db, router, "shard-a")
 
 	var user accountBalanceResponse
-	statusCode = getJSON(t, httpServer.URL+"/accounts/"+sharding.UserAccountID("user_123")+"/balances", &user)
+	statusCode = getJSON(t, httpServer.URL+"/users/user_123/balances/USD", &user)
 	if statusCode != http.StatusOK {
 		t.Fatalf("expected 200 for user balances, got %d", statusCode)
 	}
@@ -107,7 +107,7 @@ func TestWithdrawalPostHTTPIntegration(t *testing.T) {
 	processNextSingleShardCommand(t, db, router, "shard-a")
 
 	var user accountBalanceResponse
-	statusCode = getJSON(t, httpServer.URL+"/accounts/"+sharding.UserAccountID("user_123")+"/balances", &user)
+	statusCode = getJSON(t, httpServer.URL+"/users/user_123/balances/USD", &user)
 	if statusCode != http.StatusOK {
 		t.Fatalf("expected 200 for user balances, got %d", statusCode)
 	}
@@ -116,7 +116,7 @@ func TestWithdrawalPostHTTPIntegration(t *testing.T) {
 	}
 
 	var holding accountBalanceResponse
-	statusCode = getJSON(t, httpServer.URL+"/accounts/payout_holding:shard-a/balances", &holding)
+	statusCode = getJSON(t, httpServer.URL+"/accounts/payout_holding:shard-a:USD/balances", &holding)
 	if statusCode != http.StatusOK {
 		t.Fatalf("expected 200 for holding balances, got %d", statusCode)
 	}
@@ -159,7 +159,7 @@ func TestWithdrawalArchiveHTTPIntegration(t *testing.T) {
 	processNextSingleShardCommand(t, db, router, "shard-a")
 
 	var user accountBalanceResponse
-	statusCode = getJSON(t, httpServer.URL+"/accounts/"+sharding.UserAccountID("user_123")+"/balances", &user)
+	statusCode = getJSON(t, httpServer.URL+"/users/user_123/balances/USD", &user)
 	if statusCode != http.StatusOK {
 		t.Fatalf("expected 200 for user balances, got %d", statusCode)
 	}
@@ -168,7 +168,7 @@ func TestWithdrawalArchiveHTTPIntegration(t *testing.T) {
 	}
 
 	var holding accountBalanceResponse
-	statusCode = getJSON(t, httpServer.URL+"/accounts/payout_holding:shard-a/balances", &holding)
+	statusCode = getJSON(t, httpServer.URL+"/accounts/payout_holding:shard-a:USD/balances", &holding)
 	if statusCode != http.StatusOK {
 		t.Fatalf("expected 200 for holding balances, got %d", statusCode)
 	}
@@ -213,7 +213,7 @@ func TestDepositRecordHTTPIntegration(t *testing.T) {
 	processNextSingleShardCommand(t, db, router, "shard-a")
 
 	var user accountBalanceResponse
-	statusCode = getJSON(t, httpServer.URL+"/accounts/"+sharding.UserAccountID("user_123")+"/balances", &user)
+	statusCode = getJSON(t, httpServer.URL+"/users/user_123/balances/USD", &user)
 	if statusCode != http.StatusOK {
 		t.Fatalf("expected 200 for user balances, got %d", statusCode)
 	}
@@ -222,12 +222,32 @@ func TestDepositRecordHTTPIntegration(t *testing.T) {
 	}
 
 	var clearing accountBalanceResponse
-	statusCode = getJSON(t, httpServer.URL+"/accounts/cash_in_clearing:shard-a/balances", &clearing)
+	statusCode = getJSON(t, httpServer.URL+"/accounts/cash_in_clearing:shard-a:USD/balances", &clearing)
 	if statusCode != http.StatusOK {
 		t.Fatalf("expected 200 for clearing balances, got %d", statusCode)
 	}
 	if clearing.Posted != 50 || clearing.Pending != 50 || clearing.Available != 50 {
 		t.Fatalf("unexpected clearing balances after deposit record: %+v", clearing)
+	}
+}
+
+func TestInvalidAccountIDReturnsBadRequestHTTPIntegration(t *testing.T) {
+	db := testutil.OpenTestDB(t)
+	testutil.ResetTestDB(t, db)
+
+	server := New(config.Config{
+		HTTPAddr:     ":0",
+		ShardIDs:     []sharding.ShardID{"shard-a", "shard-b"},
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+	}, db)
+	httpServer := httptest.NewServer(server.httpServer.Handler)
+	defer httpServer.Close()
+
+	var response errorResponse
+	statusCode := getJSON(t, httpServer.URL+"/accounts/user_456/balances", &response)
+	if statusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid account id, got %d with %+v", statusCode, response)
 	}
 }
 
@@ -311,7 +331,7 @@ func seedHTTPIntegrationAccounts(t *testing.T, db store.DBTX) {
 	accounts := []domain.AccountState{
 		{
 			Account: domain.Account{
-				ID:            sharding.UserAccountID("user_123"),
+				ID:            sharding.UserAccountID("user_123", "USD"),
 				Currency:      "USD",
 				NormalBalance: domain.NormalBalanceCredit,
 				CreatedAt:     now,
@@ -326,7 +346,7 @@ func seedHTTPIntegrationAccounts(t *testing.T, db store.DBTX) {
 		},
 		{
 			Account: domain.Account{
-				ID:            "payout_holding:shard-a",
+				ID:            "payout_holding:shard-a:USD",
 				Currency:      "USD",
 				NormalBalance: domain.NormalBalanceCredit,
 				CreatedAt:     now,
@@ -338,7 +358,7 @@ func seedHTTPIntegrationAccounts(t *testing.T, db store.DBTX) {
 		},
 		{
 			Account: domain.Account{
-				ID:            "cash_in_clearing:shard-a",
+				ID:            "cash_in_clearing:shard-a:USD",
 				Currency:      "USD",
 				NormalBalance: domain.NormalBalanceDebit,
 				CreatedAt:     now,

@@ -44,7 +44,7 @@ func TestShardAwareReadsHTTPIntegration(t *testing.T) {
 	defer httpServer.Close()
 
 	userID := httpTestUserIDForShard(t, router, "shard-b")
-	systemAccountID, shardID, err := router.SystemAccountForUser(userID, sharding.SystemAccountRolePayoutHold)
+	systemAccountID, shardID, err := router.SystemAccountForUser(userID, "USD", sharding.SystemAccountRolePayoutHold)
 	if err != nil {
 		t.Fatalf("pick system account: %v", err)
 	}
@@ -92,11 +92,11 @@ func TestShardAwareReadsHTTPIntegration(t *testing.T) {
 	}
 
 	var balance accountBalanceResponse
-	statusCode = getJSON(t, httpServer.URL+"/accounts/"+sharding.UserAccountID(userID)+"/balances", &balance)
+	statusCode = getJSON(t, httpServer.URL+"/users/"+userID+"/balances/USD", &balance)
 	if statusCode != http.StatusOK {
 		t.Fatalf("expected 200 on account balance get, got %d", statusCode)
 	}
-	if balance.AccountID != sharding.UserAccountID(userID) || balance.Posted != 100 || balance.Pending != 30 || balance.Available != 30 {
+	if balance.AccountID != sharding.UserAccountID(userID, "USD") || balance.Posted != 100 || balance.Pending != 30 || balance.Available != 30 {
 		t.Fatalf("unexpected balance response: %+v", balance)
 	}
 
@@ -149,7 +149,7 @@ func seedShardHTTPAccounts(t *testing.T, db store.DBTX, userID, systemAccountID 
 	accounts := []domain.AccountState{
 		{
 			Account: domain.Account{
-				ID:            sharding.UserAccountID(userID),
+				ID:            sharding.UserAccountID(userID, "USD"),
 				Currency:      "USD",
 				NormalBalance: domain.NormalBalanceCredit,
 				CreatedAt:     now,
