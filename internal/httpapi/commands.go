@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -96,6 +97,7 @@ func (s *Server) handleEnqueueTransactionCreate(w http.ResponseWriter, r *http.R
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		slog.Error("enqueue transaction create command", "user_id", request.UserID, "idempotency_key", request.IdempotencyKey, "transaction_id", request.TransactionID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
@@ -106,6 +108,11 @@ func (s *Server) handleEnqueueTransactionCreate(w http.ResponseWriter, r *http.R
 func (s *Server) handleEnqueueWithdrawalCreate(w http.ResponseWriter, r *http.Request) {
 	var request enqueueWithdrawalCreateCommandRequest
 	if !decodeJSONBody(w, r, &request) {
+		return
+	}
+
+	if envelope, ok := s.idempotencyCache.Get(command.TypeWithdrawalCreate, request.IdempotencyKey); ok {
+		writeCommandResponse(w, envelope, true)
 		return
 	}
 
@@ -124,10 +131,12 @@ func (s *Server) handleEnqueueWithdrawalCreate(w http.ResponseWriter, r *http.Re
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		slog.Error("enqueue withdrawal create command", "user_id", request.UserID, "idempotency_key", request.IdempotencyKey, "transaction_id", request.TransactionID, "currency", request.Currency, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
+	s.idempotencyCache.Put(command.TypeWithdrawalCreate, request.IdempotencyKey, envelope)
 	writeCommandResponse(w, envelope, idempotent)
 }
 
@@ -142,6 +151,11 @@ func (s *Server) handleEnqueueWithdrawalArchive(w http.ResponseWriter, r *http.R
 func (s *Server) handleEnqueueDepositRecord(w http.ResponseWriter, r *http.Request) {
 	var request enqueueDepositRecordCommandRequest
 	if !decodeJSONBody(w, r, &request) {
+		return
+	}
+
+	if envelope, ok := s.idempotencyCache.Get(command.TypeDepositRecord, request.IdempotencyKey); ok {
+		writeCommandResponse(w, envelope, true)
 		return
 	}
 
@@ -160,10 +174,12 @@ func (s *Server) handleEnqueueDepositRecord(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		slog.Error("enqueue deposit record command", "user_id", request.UserID, "idempotency_key", request.IdempotencyKey, "transaction_id", request.TransactionID, "currency", request.Currency, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
+	s.idempotencyCache.Put(command.TypeDepositRecord, request.IdempotencyKey, envelope)
 	writeCommandResponse(w, envelope, idempotent)
 }
 
@@ -178,6 +194,11 @@ func (s *Server) handleEnqueueTransactionArchive(w http.ResponseWriter, r *http.
 func (s *Server) handleEnqueueTransition(w http.ResponseWriter, r *http.Request, commandType command.Type) {
 	var request enqueueTransitionCommandRequest
 	if !decodeJSONBody(w, r, &request) {
+		return
+	}
+
+	if envelope, ok := s.idempotencyCache.Get(commandType, request.IdempotencyKey); ok {
+		writeCommandResponse(w, envelope, true)
 		return
 	}
 
@@ -203,14 +224,21 @@ func (s *Server) handleEnqueueTransition(w http.ResponseWriter, r *http.Request,
 	case command.TypeWithdrawalArchive:
 		envelope, idempotent, err = s.commandService.EnqueueWithdrawalArchive(r.Context(), input)
 	default:
+		slog.Error("enqueue transition command", "error", "unsupported command type", "type", commandType)
 		writeError(w, http.StatusInternalServerError, "unsupported command type")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		if isClientError(err) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		slog.Error("enqueue transition command", "user_id", request.UserID, "idempotency_key", request.IdempotencyKey, "transaction_id", request.TransactionID, "type", commandType, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
+	s.idempotencyCache.Put(commandType, request.IdempotencyKey, envelope)
 	writeCommandResponse(w, envelope, idempotent)
 }
 

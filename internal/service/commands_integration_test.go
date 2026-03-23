@@ -310,6 +310,63 @@ func TestCommandServiceProcessNextPostsTransactionIntegration(t *testing.T) {
 	}
 }
 
+func TestCommandServiceProcessByIDIntegration(t *testing.T) {
+	db := testutil.OpenTestDB(t)
+	testutil.ResetTestDB(t, db)
+
+	router, err := sharding.NewRouter([]sharding.ShardID{"shard-a", "shard-b"}, nil)
+	if err != nil {
+		t.Fatalf("build router: %v", err)
+	}
+
+	commandService := NewCommandService(db, router, nil)
+	systemAccountID, shardID, err := router.SystemAccountForUser("user_123", "USD", sharding.SystemAccountRolePayoutHold)
+	if err != nil {
+		t.Fatalf("pick system account: %v", err)
+	}
+
+	seedCommandExecutionAccounts(t, db, systemAccountID)
+
+	enqueued, _, err := commandService.EnqueueTransactionCreate(context.Background(), EnqueueCreateTransactionCommandInput{
+		UserID:         "user_123",
+		IdempotencyKey: "idem_cmd_process_by_id_1",
+		CreateInput: CreateTransactionInput{
+			Flow:          TransactionFlowAuthorizing,
+			TransactionID: "tx_cmd_process_by_id_1",
+			PostingKey:    "pk_cmd_process_by_id_1",
+			Type:          "wallet_transfer_hold",
+			EffectiveAt:   time.Date(2026, 3, 22, 8, 0, 0, 0, time.UTC),
+			CreatedAt:     time.Date(2026, 3, 22, 8, 0, 1, 0, time.UTC),
+			Entries: []CreateEntryInput{
+				{EntryID: "entry_cmd_process_by_id_1_debit", AccountID: sharding.UserAccountID("user_123", "USD"), Amount: 70, Currency: "USD", Direction: "debit"},
+				{EntryID: "entry_cmd_process_by_id_1_credit", AccountID: systemAccountID, Amount: 70, Currency: "USD", Direction: "credit"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("enqueue command: %v", err)
+	}
+
+	processed, ok, err := commandService.ProcessByID(context.Background(), enqueued.CommandID, shardID, time.Date(2026, 3, 22, 9, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("process command by id: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected command to be processed by id")
+	}
+	if processed.CommandID != enqueued.CommandID || processed.Status != command.StatusSucceeded {
+		t.Fatalf("unexpected processed command: %+v", processed)
+	}
+
+	_, ok, err = commandService.ProcessByID(context.Background(), enqueued.CommandID, shardID, time.Date(2026, 3, 22, 9, 0, 1, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("process command by id second time: %v", err)
+	}
+	if ok {
+		t.Fatal("expected already processed command not to be claimable again")
+	}
+}
+
 func seedCommandExecutionAccounts(t *testing.T, db *sql.DB, systemAccountID string) {
 	t.Helper()
 

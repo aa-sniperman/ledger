@@ -17,7 +17,7 @@ SEED_CURRENCY ?= USD
 help:
 	@echo "Available targets:"
 	@echo "  make api              Run the API server"
-	@echo "  make worker           Run the command worker"
+	@echo "  make worker           Run the command worker (set WORKER_SHARD_IDS to limit shard ownership)"
 	@echo "  make seed             Seed users, system accounts, and mint balances"
 	@echo "  make seed-accounts    Seed users and system accounts only"
 	@echo "  make clean-legacy-seed Remove legacy single-currency seed data"

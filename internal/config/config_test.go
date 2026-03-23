@@ -13,12 +13,21 @@ func TestLoadUsesDefaultTestDatabaseURL(t *testing.T) {
 	t.Setenv("DATABASE_URL", "")
 	t.Setenv("TEST_DATABASE_URL", "")
 	t.Setenv("SHARD_IDS", "")
+	t.Setenv("WORKER_SHARD_IDS", "")
 	t.Setenv("SHARD_DATABASE_URLS", "")
 	t.Setenv("TEST_SHARD_DATABASE_URLS", "")
 	t.Setenv("SHUTDOWN_TIMEOUT", "")
 	t.Setenv("HTTP_READ_TIMEOUT", "")
 	t.Setenv("HTTP_WRITE_TIMEOUT", "")
 	t.Setenv("WORKER_POLL_INTERVAL", "")
+	t.Setenv("API_IDEMPOTENCY_CACHE_TTL", "")
+	t.Setenv("KAFKA_ENABLED", "")
+	t.Setenv("KAFKA_BROKERS", "")
+	t.Setenv("KAFKA_COMMANDS_TOPIC", "")
+	t.Setenv("KAFKA_CONSUMER_GROUP", "")
+	t.Setenv("KAFKA_AUTO_CREATE_TOPIC", "")
+	t.Setenv("KAFKA_TOPIC_PARTITIONS", "")
+	t.Setenv("KAFKA_REPLICATION_FACTOR", "")
 
 	cfg, err := Load()
 	if err != nil {
@@ -31,6 +40,9 @@ func TestLoadUsesDefaultTestDatabaseURL(t *testing.T) {
 
 	if len(cfg.ShardIDs) != 1 || string(cfg.ShardIDs[0]) != "shard-a" {
 		t.Fatalf("expected default shard ids [shard-a], got %+v", cfg.ShardIDs)
+	}
+	if len(cfg.WorkerShardIDs) != 1 || string(cfg.WorkerShardIDs[0]) != "shard-a" {
+		t.Fatalf("expected default worker shard ids [shard-a], got %+v", cfg.WorkerShardIDs)
 	}
 }
 
@@ -57,6 +69,23 @@ func TestLoadParsesShardIDs(t *testing.T) {
 
 	if len(cfg.ShardIDs) != 3 || string(cfg.ShardIDs[0]) != "shard-a" || string(cfg.ShardIDs[2]) != "shard-c" {
 		t.Fatalf("expected parsed shard ids, got %+v", cfg.ShardIDs)
+	}
+	if len(cfg.WorkerShardIDs) != 3 || string(cfg.WorkerShardIDs[1]) != "shard-b" {
+		t.Fatalf("expected worker shard ids to default to all shard ids, got %+v", cfg.WorkerShardIDs)
+	}
+}
+
+func TestLoadParsesWorkerShardSubset(t *testing.T) {
+	t.Setenv("SHARD_IDS", "shard-a,shard-b,shard-c")
+	t.Setenv("WORKER_SHARD_IDS", "shard-b, shard-c")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("expected config load to succeed, got %v", err)
+	}
+
+	if len(cfg.WorkerShardIDs) != 2 || string(cfg.WorkerShardIDs[0]) != "shard-b" || string(cfg.WorkerShardIDs[1]) != "shard-c" {
+		t.Fatalf("expected worker shard subset, got %+v", cfg.WorkerShardIDs)
 	}
 }
 
@@ -156,5 +185,55 @@ func TestLoadParsesWorkerPollInterval(t *testing.T) {
 
 	if cfg.WorkerPollInterval != 750*time.Millisecond {
 		t.Fatalf("expected worker poll interval 750ms, got %s", cfg.WorkerPollInterval)
+	}
+}
+
+func TestLoadParsesAPIIdempotencyCacheTTL(t *testing.T) {
+	t.Setenv("API_IDEMPOTENCY_CACHE_TTL", "45s")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("expected config load to succeed, got %v", err)
+	}
+
+	if cfg.APIIdempotencyCacheTTL != 45*time.Second {
+		t.Fatalf("expected API idempotency cache ttl 45s, got %s", cfg.APIIdempotencyCacheTTL)
+	}
+}
+
+func TestLoadParsesKafkaSettings(t *testing.T) {
+	t.Setenv("KAFKA_ENABLED", "true")
+	t.Setenv("KAFKA_BROKERS", "localhost:9092, localhost:9093")
+	t.Setenv("KAFKA_COMMANDS_TOPIC", "custom.commands")
+	t.Setenv("KAFKA_CONSUMER_GROUP", "custom-worker")
+	t.Setenv("KAFKA_AUTO_CREATE_TOPIC", "true")
+	t.Setenv("KAFKA_TOPIC_PARTITIONS", "8")
+	t.Setenv("KAFKA_REPLICATION_FACTOR", "2")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("expected config load to succeed, got %v", err)
+	}
+
+	if !cfg.KafkaEnabled {
+		t.Fatal("expected kafka to be enabled")
+	}
+	if len(cfg.KafkaBrokers) != 2 || cfg.KafkaBrokers[1] != "localhost:9093" {
+		t.Fatalf("expected parsed kafka brokers, got %+v", cfg.KafkaBrokers)
+	}
+	if cfg.KafkaCommandsTopic != "custom.commands" {
+		t.Fatalf("expected kafka topic override, got %q", cfg.KafkaCommandsTopic)
+	}
+	if cfg.KafkaConsumerGroup != "custom-worker" {
+		t.Fatalf("expected kafka group override, got %q", cfg.KafkaConsumerGroup)
+	}
+	if !cfg.KafkaAutoCreateTopic {
+		t.Fatal("expected kafka auto create topic to be enabled")
+	}
+	if cfg.KafkaTopicPartitions != 8 {
+		t.Fatalf("expected kafka partitions 8, got %d", cfg.KafkaTopicPartitions)
+	}
+	if cfg.KafkaReplicationFactor != 2 {
+		t.Fatalf("expected kafka replication factor 2, got %d", cfg.KafkaReplicationFactor)
 	}
 }

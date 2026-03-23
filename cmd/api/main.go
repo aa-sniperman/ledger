@@ -13,6 +13,7 @@ import (
 	"github.com/sniperman/ledger/internal/config"
 	"github.com/sniperman/ledger/internal/database"
 	"github.com/sniperman/ledger/internal/httpapi"
+	"github.com/sniperman/ledger/internal/kafkabus"
 	"github.com/sniperman/ledger/internal/sharding"
 )
 
@@ -32,6 +33,13 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
+
+	if cfg.KafkaEnabled && cfg.KafkaAutoCreateTopic {
+		if err := kafkabus.EnsureTopic(ctx, cfg.KafkaBrokers, cfg.KafkaCommandsTopic, cfg.KafkaTopicPartitions, cfg.KafkaReplicationFactor); err != nil {
+			slog.Error("ensure kafka topic", "topic", cfg.KafkaCommandsTopic, "error", err)
+			os.Exit(1)
+		}
+	}
 
 	var shardDBs map[sharding.ShardID]*sql.DB
 	if len(cfg.ShardDatabaseURLs) > 0 {

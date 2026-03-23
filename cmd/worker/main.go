@@ -10,6 +10,7 @@ import (
 
 	"github.com/sniperman/ledger/internal/config"
 	"github.com/sniperman/ledger/internal/database"
+	"github.com/sniperman/ledger/internal/kafkabus"
 	"github.com/sniperman/ledger/internal/service"
 	"github.com/sniperman/ledger/internal/sharding"
 	"github.com/sniperman/ledger/internal/worker"
@@ -66,13 +67,36 @@ func main() {
 	}
 
 	commandService := service.NewCommandService(centralDB, router, registry)
-	fleet, err := worker.NewFleet(commandService, cfg.ShardIDs, cfg.WorkerPollInterval, slog.Default())
+	if cfg.KafkaEnabled {
+		if cfg.KafkaAutoCreateTopic {
+			if err := kafkabus.EnsureTopic(ctx, cfg.KafkaBrokers, cfg.KafkaCommandsTopic, cfg.KafkaTopicPartitions, cfg.KafkaReplicationFactor); err != nil {
+				slog.Error("ensure kafka topic", "topic", cfg.KafkaCommandsTopic, "error", err)
+				os.Exit(1)
+			}
+		}
+
+		consumer, err := kafkabus.NewConsumer(cfg.KafkaBrokers, cfg.KafkaCommandsTopic, cfg.KafkaConsumerGroup, commandService, slog.Default())
+		if err != nil {
+			slog.Error("build kafka consumer", "error", err)
+			os.Exit(1)
+		}
+
+		slog.Info("starting kafka command consumer", "brokers", cfg.KafkaBrokers, "topic", cfg.KafkaCommandsTopic, "group", cfg.KafkaConsumerGroup)
+		if err := consumer.Run(ctx); err != nil {
+			slog.Error("run kafka consumer", "error", err)
+			os.Exit(1)
+		}
+		slog.Info("worker stopped")
+		return
+	}
+
+	fleet, err := worker.NewFleet(commandService, cfg.WorkerShardIDs, cfg.WorkerPollInterval, slog.Default())
 	if err != nil {
 		slog.Error("build worker fleet", "error", err)
 		os.Exit(1)
 	}
 
-	slog.Info("starting worker fleet", "shards", cfg.ShardIDs, "poll_interval", cfg.WorkerPollInterval)
+	slog.Info("starting worker fleet", "shards", cfg.WorkerShardIDs, "poll_interval", cfg.WorkerPollInterval)
 	fleet.Run(ctx)
 	slog.Info("worker fleet stopped")
 }

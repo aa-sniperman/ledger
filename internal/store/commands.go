@@ -113,6 +113,28 @@ WHERE command_type = $1
 	return r.getOne(ctx, query, commandType, idempotencyKey)
 }
 
+func (r *CommandRepository) DeleteByID(ctx context.Context, commandID string) error {
+	const query = `
+DELETE FROM ledger.ledger_commands
+WHERE command_id = $1
+`
+
+	result, err := r.db.ExecContext(ctx, query, commandID)
+	if err != nil {
+		return fmt.Errorf("delete command %s: %w", commandID, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected for delete command %s: %w", commandID, err)
+	}
+	if rowsAffected != 1 {
+		return fmt.Errorf("%w: command %s", ErrNotFound, commandID)
+	}
+
+	return nil
+}
+
 func (r *CommandRepository) ClaimNext(ctx context.Context, shardID sharding.ShardID, now time.Time) (command.Envelope, bool, error) {
 	const query = `
 WITH candidate AS (
@@ -149,6 +171,44 @@ RETURNING
 `
 
 	envelope, err := r.scanOne(ctx, query, shardID, now, command.StatusProcessing)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return command.Envelope{}, false, nil
+		}
+		return command.Envelope{}, false, err
+	}
+
+	return envelope, true, nil
+}
+
+func (r *CommandRepository) ClaimByID(ctx context.Context, commandID string, shardID sharding.ShardID, now time.Time) (command.Envelope, bool, error) {
+	const query = `
+UPDATE ledger.ledger_commands c
+SET
+	status = $3,
+	attempt_count = c.attempt_count + 1,
+	updated_at = $4
+WHERE c.command_id = $1
+  AND c.shard_id = $2
+  AND c.status IN ('accepted', 'failed_retryable')
+  AND (c.next_attempt_at IS NULL OR c.next_attempt_at <= $4)
+RETURNING
+	c.command_id,
+	c.idempotency_key,
+	c.shard_id,
+	c.command_type,
+	c.payload_json,
+	c.status,
+	c.attempt_count,
+	c.next_attempt_at,
+	c.result_json,
+	c.error_code,
+	c.error_message,
+	c.created_at,
+	c.updated_at
+`
+
+	envelope, err := r.scanOne(ctx, query, commandID, shardID, command.StatusProcessing, now)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return command.Envelope{}, false, nil

@@ -348,7 +348,7 @@ Status as of 2026-03-23:
 - Milestone 3: complete
 - Milestone 4: complete
 - Milestone 5: complete in code and integration tests
-- Milestone 6: not started
+- Milestone 6: complete with Kafka as the command delivery path
 
 ### Milestone 1: Shard Routing Contract
 
@@ -393,9 +393,17 @@ Implemented:
 
 ### Milestone 6: Kafka Integration
 
-- replace or complement DB-backed queue with Kafka
+- replace DB polling delivery with Kafka
 - partition by `shard_id`
 - keep DB idempotency and command status semantics unchanged
+
+Implemented:
+
+- Kafka publisher for accepted commands keyed by `shard_id`
+- Kafka consumer path that claims and processes commands by `command_id`
+- DB-backed command table remains the source of truth for idempotency, status, retries, and query APIs
+- worker delivery now relies on Kafka when Kafka mode is enabled; DB polling remains only for non-Kafka deployments
+- Kafka config and runtime wiring in API and worker processes
 
 ## Testing Plan
 

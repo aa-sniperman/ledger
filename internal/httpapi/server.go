@@ -4,10 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"io"
 	"net/http"
 	"time"
 
 	"github.com/sniperman/ledger/internal/config"
+	"github.com/sniperman/ledger/internal/kafkabus"
 	"github.com/sniperman/ledger/internal/service"
 	"github.com/sniperman/ledger/internal/sharding"
 )
@@ -18,7 +20,9 @@ type Server struct {
 	commandService     *service.CommandService
 	queryService       *service.QueryService
 	transactionService *service.TransactionService
+	idempotencyCache   *idempotencyCache
 	httpServer         *http.Server
+	closers            []io.Closer
 }
 
 type healthResponse struct {
@@ -48,12 +52,25 @@ func NewWithRegistry(cfg config.Config, db *sql.DB, router sharding.Router, regi
 		panic("nil shard db registry")
 	}
 
+	commandService := service.NewCommandService(db, router, registry)
+	closers := make([]io.Closer, 0, 1)
+	if cfg.KafkaEnabled {
+		publisher, err := kafkabus.NewPublisher(cfg.KafkaBrokers, cfg.KafkaCommandsTopic)
+		if err != nil {
+			panic(err)
+		}
+		commandService = service.NewCommandServiceWithPublisher(db, router, registry, publisher)
+		closers = append(closers, publisher)
+	}
+
 	server := &Server{
 		db:                 db,
 		accountService:     service.NewAccountService(db),
-		commandService:     service.NewCommandService(db, router, registry),
+		commandService:     commandService,
 		queryService:       service.NewQueryService(db, router, registry),
 		transactionService: service.NewTransactionService(db),
+		idempotencyCache:   newIdempotencyCache(cfg.APIIdempotencyCacheTTL),
+		closers:            closers,
 	}
 
 	mux := http.NewServeMux()
@@ -87,7 +104,13 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
-	return s.httpServer.Shutdown(ctx)
+	err := s.httpServer.Shutdown(ctx)
+	for _, closer := range s.closers {
+		if closeErr := closer.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}
+	return err
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {

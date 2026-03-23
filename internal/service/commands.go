@@ -10,16 +10,18 @@ import (
 	"time"
 
 	"github.com/sniperman/ledger/internal/command"
+	"github.com/sniperman/ledger/internal/commandbus"
 	"github.com/sniperman/ledger/internal/domain"
 	"github.com/sniperman/ledger/internal/sharding"
 	"github.com/sniperman/ledger/internal/store"
 )
 
 type CommandService struct {
-	db       *sql.DB
-	router   sharding.Router
-	registry *sharding.DBRegistry
-	store    store.Repositories
+	db        *sql.DB
+	router    sharding.Router
+	registry  *sharding.DBRegistry
+	store     store.Repositories
+	publisher commandbus.Publisher
 }
 
 const commandRetryDelay = 30 * time.Second
@@ -53,6 +55,10 @@ type createTransactionCommandPayload struct {
 }
 
 func NewCommandService(db *sql.DB, router sharding.Router, registry *sharding.DBRegistry) *CommandService {
+	return NewCommandServiceWithPublisher(db, router, registry, commandbus.NoopPublisher{})
+}
+
+func NewCommandServiceWithPublisher(db *sql.DB, router sharding.Router, registry *sharding.DBRegistry, publisher commandbus.Publisher) *CommandService {
 	if registry == nil {
 		singleRegistry, err := sharding.NewSingleDBRegistry(router.ShardIDs(), db)
 		if err != nil {
@@ -60,12 +66,16 @@ func NewCommandService(db *sql.DB, router sharding.Router, registry *sharding.DB
 		}
 		registry = singleRegistry
 	}
+	if publisher == nil {
+		publisher = commandbus.NoopPublisher{}
+	}
 
 	return &CommandService{
-		db:       db,
-		router:   router,
-		registry: registry,
-		store:    store.NewRepositories(db),
+		db:        db,
+		router:    router,
+		registry:  registry,
+		store:     store.NewRepositories(db),
+		publisher: publisher,
 	}
 }
 
@@ -194,6 +204,27 @@ func (s *CommandService) ProcessNext(ctx context.Context, shardID sharding.Shard
 	return updatedEnvelope, true, nil
 }
 
+func (s *CommandService) ProcessByID(ctx context.Context, commandID string, shardID sharding.ShardID, now time.Time) (command.Envelope, bool, error) {
+	if strings.TrimSpace(commandID) == "" {
+		return command.Envelope{}, false, fmt.Errorf("command id is required")
+	}
+	if err := shardID.Validate(); err != nil {
+		return command.Envelope{}, false, err
+	}
+
+	envelope, ok, err := s.store.Commands.ClaimByID(ctx, commandID, shardID, now.UTC())
+	if err != nil || !ok {
+		return envelope, ok, err
+	}
+
+	updatedEnvelope, err := s.processClaimed(ctx, envelope, now.UTC())
+	if err != nil {
+		return command.Envelope{}, false, err
+	}
+
+	return updatedEnvelope, true, nil
+}
+
 func (s *CommandService) enqueueTransition(ctx context.Context, commandType command.Type, input EnqueueTransitionCommandInput) (command.Envelope, bool, error) {
 	if strings.TrimSpace(input.UserID) == "" {
 		return command.Envelope{}, false, fmt.Errorf("user id is required")
@@ -244,6 +275,14 @@ func (s *CommandService) enqueue(ctx context.Context, shardID sharding.ShardID, 
 			}
 		}
 		return command.Envelope{}, false, err
+	}
+
+	if err := s.publisher.PublishAccepted(ctx, envelope); err != nil {
+		deleteErr := s.store.Commands.DeleteByID(ctx, envelope.CommandID)
+		if deleteErr != nil && !errors.Is(deleteErr, store.ErrNotFound) {
+			return command.Envelope{}, false, fmt.Errorf("publish command %s: %w (cleanup failed: %v)", envelope.CommandID, err, deleteErr)
+		}
+		return command.Envelope{}, false, fmt.Errorf("publish command %s: %w", envelope.CommandID, err)
 	}
 
 	return envelope, false, nil
